@@ -15,6 +15,7 @@ pip install -e .
 Note: ensure `libboost-dev`, `gcc`, `g++` are installed on your system.
 
 ### TO-DO
-[ x ] Download HumanML3D dataset
-[ ] Train a VQ-GAN codebook and visualize reconstructions
-[ ] Train a masked autoencoder on top of the learnt motion codebook
+- [x] Download HumanML3D dataset
+- [ ] Visualize HumanML3D dataset
+- [ ] Train a VQ-GAN codebook and visualize reconstructions
+- [ ] Train a masked autoencoder on top of the learnt motion codebook
