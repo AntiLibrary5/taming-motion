@@ -14,8 +14,25 @@ pip install -e .
 ```
 Note: ensure `libboost-dev`, `gcc`, `g++` are installed on your system.
 
-### TO-DO
+## TO-DO
 - [x] Download HumanML3D dataset
-- [ ] Visualize HumanML3D dataset
+- [x] Visualize HumanML3D dataset
 - [ ] Train a VQ-GAN codebook and visualize reconstructions
 - [ ] Train a masked autoencoder on top of the learnt motion codebook
+
+## Dataset
+Using the [HumanML3D](https://openaccess.thecvf.com/content/CVPR2022/papers/Guo_Generating_Diverse_and_Natural_3D_Human_Motions_From_Text_CVPR_2022_paper.pdf) 
+data: a 3D human motion-language dataset that originates from a combination of HumanAct12 and Amass dataset. Follow the 
+instructions in the [HumanML3D github repo](https://github.com/EricGuo5513/HumanML3D) to download and process the dataset.
+
+Data directory: `/media/varora/LaCie1/Datasets/HumanML3D/`
+
+<img src="assets/data/gifs/000000.gif" width="25%" height="25%"/>
+<img src="assets/data/gifs/000001.gif" width="25%" height="25%"/>
+<img src="assets/data/gifs/000002.gif" width="25%" height="25%"/>
+<img src="assets/data/gifs/000003.gif" width="25%" height="25%"/>
+<img src="assets/data/gifs/000004.gif" width="25%" height="25%"/>
+<img src="assets/data/gifs/000005.gif" width="25%" height="25%"/>
+<img src="assets/data/gifs/000006.gif" width="25%" height="25%"/>
+<img src="assets/data/gifs/000007.gif" width="25%" height="25%"/>
+<img src="assets/data/gifs/000008.gif" width="25%" height="25%"/>

@@ -1,5 +1,0 @@
-/home/varora/PythonProjects/taming-motion/data/example_data/imagesTr/adipose_0004_0000.jpg
-/home/varora/PythonProjects/taming-motion/data/example_data/imagesTr/adipose_0005_0000.jpg
-/home/varora/PythonProjects/taming-motion/data/example_data/imagesTr/adipose_0002_0000.jpg
-/home/varora/PythonProjects/taming-motion/data/example_data/imagesTr/adipose_0003_0000.jpg
-/home/varora/PythonProjects/taming-motion/data/example_data/imagesTr/adipose_0001_0000.jpg
