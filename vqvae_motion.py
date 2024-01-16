@@ -1,3 +1,5 @@
+import importlib
+mpl_toolkits = importlib.import_module('mpl_toolkits')
 import os
 from os.path import join as pjoin
 import sys
@@ -10,18 +12,35 @@ import torch
 from torch.utils import data
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pack_padded_sequence
+from torch.utils.data._utils.collate import default_collate
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
+from scipy import linalg
+
 import random
 import codecs as cs
 from tqdm import tqdm
 import pickle
 import re
 
+import matplotlib.pyplot as plt
+import numpy as np
+import io
+import matplotlib
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+import mpl_toolkits.mplot3d.axes3d as p3
+from textwrap import wrap
+import imageio
 
-# ARGS
+import param_util
+
+
+########
+# ARGS #
+########
 def get_args_parser():
     parser = argparse.ArgumentParser(description='Optimal Transport AutoEncoder training for AIST',
                                      add_help=True,
@@ -84,8 +103,132 @@ def get_args_parser():
     return parser.parse_args()
 
 
-# DATALOADER
+########
+# PLOT #
+########
+def plot_3d_motion(args, figsize=(10, 10), fps=120, radius=4):
+    matplotlib.use('Agg')
 
+    joints, out_name, title = args
+
+    data = joints.copy().reshape(len(joints), -1, 3)
+
+    nb_joints = joints.shape[1]
+    smpl_kinetic_chain = [[0, 11, 12, 13, 14, 15], [0, 16, 17, 18, 19, 20], [0, 1, 2, 3, 4], [3, 5, 6, 7],
+                          [3, 8, 9, 10]] if nb_joints == 21 else [[0, 2, 5, 8, 11], [0, 1, 4, 7, 10],
+                                                                  [0, 3, 6, 9, 12, 15], [9, 14, 17, 19, 21],
+                                                                  [9, 13, 16, 18, 20]]
+    limits = 1000 if nb_joints == 21 else 2
+    MINS = data.min(axis=0).min(axis=0)
+    MAXS = data.max(axis=0).max(axis=0)
+    colors = ['red', 'blue', 'black', 'red', 'blue',
+              'darkblue', 'darkblue', 'darkblue', 'darkblue', 'darkblue',
+              'darkred', 'darkred', 'darkred', 'darkred', 'darkred']
+    frame_number = data.shape[0]
+    #     print(data.shape)
+
+    height_offset = MINS[1]
+    data[:, :, 1] -= height_offset
+    trajec = data[:, 0, [0, 2]]
+
+    data[..., 0] -= data[:, 0:1, 0]
+    data[..., 2] -= data[:, 0:1, 2]
+
+    def update(index):
+
+        def init():
+            ax.set_xlim(-limits, limits)
+            ax.set_ylim(-limits, limits)
+            ax.set_zlim(0, limits)
+            ax.grid(b=False)
+
+        def plot_xzPlane(minx, maxx, miny, minz, maxz):
+            ## Plot a plane XZ
+            verts = [
+                [minx, miny, minz],
+                [minx, miny, maxz],
+                [maxx, miny, maxz],
+                [maxx, miny, minz]
+            ]
+            xz_plane = Poly3DCollection([verts])
+            xz_plane.set_facecolor((0.5, 0.5, 0.5, 0.5))
+            ax.add_collection3d(xz_plane)
+
+        fig = plt.figure(figsize=(480 / 96., 320 / 96.), dpi=96) if nb_joints == 21 else plt.figure(figsize=(10, 10),
+                                                                                                    dpi=96)
+        if title is not None:
+            wraped_title = '\n'.join(wrap(title, 40))
+            fig.suptitle(wraped_title, fontsize=16)
+        ax = p3.Axes3D(fig)
+
+        init()
+
+        ax.lines = []
+        ax.collections = []
+        ax.view_init(elev=110, azim=-90)
+        ax.dist = 7.5
+        #         ax =
+        plot_xzPlane(MINS[0] - trajec[index, 0], MAXS[0] - trajec[index, 0], 0, MINS[2] - trajec[index, 1],
+                     MAXS[2] - trajec[index, 1])
+        #         ax.scatter(data[index, :22, 0], data[index, :22, 1], data[index, :22, 2], color='black', s=3)
+
+        if index > 1:
+            ax.plot3D(trajec[:index, 0] - trajec[index, 0], np.zeros_like(trajec[:index, 0]),
+                      trajec[:index, 1] - trajec[index, 1], linewidth=1.0,
+                      color='blue')
+        #             ax = plot_xzPlane(ax, MINS[0], MAXS[0], 0, MINS[2], MAXS[2])
+
+        for i, (chain, color) in enumerate(zip(smpl_kinetic_chain, colors)):
+            #             print(color)
+            if i < 5:
+                linewidth = 4.0
+            else:
+                linewidth = 2.0
+            ax.plot3D(data[index, chain, 0], data[index, chain, 1], data[index, chain, 2], linewidth=linewidth,
+                      color=color)
+        #         print(trajec[:index, 0].shape)
+
+        plt.axis('off')
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        ax.set_zticklabels([])
+
+        if out_name is not None:
+            plt.savefig(out_name, dpi=96)
+            plt.close()
+
+        else:
+            io_buf = io.BytesIO()
+            fig.savefig(io_buf, format='raw', dpi=96)
+            io_buf.seek(0)
+            # print(fig.bbox.bounds)
+            arr = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
+                             newshape=(int(fig.bbox.bounds[3]), int(fig.bbox.bounds[2]), -1))
+            io_buf.close()
+            plt.close()
+            return arr
+
+    out = []
+    for i in range(frame_number):
+        out.append(update(i))
+    out = np.stack(out, axis=0)
+    return torch.from_numpy(out)
+
+
+def draw_to_batch(smpl_joints_batch, title_batch=None, outname=None):
+    batch_size = len(smpl_joints_batch)
+    out = []
+    for i in range(batch_size):
+        out.append(plot_3d_motion([smpl_joints_batch[i], None, title_batch[i] if title_batch is not None else None]))
+        if outname is not None:
+            imageio.mimsave(outname[i], np.array(out[-1]), fps=20)
+    out = torch.stack(out, axis=0)
+    return out
+
+
+####################
+# VQVAE DATALOADER #
+####################
 POS_enumerator = {
     'VERB': 0,
     'NOUN': 1,
@@ -258,7 +401,200 @@ def cycle(iterable):
             yield x
 
 
-# MODEL
+##################
+# T2M DATALOADER #
+##################
+'''For use of training text-2-motion generative model'''
+
+
+class Text2MotionDataset(data.Dataset):
+    def __init__(self, dataset_name, is_test, w_vectorizer, feat_bias=5, max_text_len=20, unit_length=4):
+
+        self.max_length = 20
+        self.pointer = 0
+        self.dataset_name = dataset_name
+        self.is_test = is_test
+        self.max_text_len = max_text_len
+        self.unit_length = unit_length
+        self.w_vectorizer = w_vectorizer
+
+        self.data_root = '/media/varora/LaCie/Datasets/HumanML3D/HumanML3D/'
+        self.motion_dir = pjoin(self.data_root, 'new_joint_vecs')
+        self.text_dir = pjoin(self.data_root, 'texts')
+        self.joints_num = 22
+        radius = 4
+        fps = 20
+        self.max_motion_length = 196
+        dim_pose = 263
+        kinematic_chain = param_util.t2m_kinematic_chain
+        self.meta_dir = 'checkpoints/t2m/VQVAEV3_CB1024_CMT_H1024_NRES3/meta'
+
+        mean = np.load(pjoin(self.meta_dir, 'mean.npy'))
+        std = np.load(pjoin(self.meta_dir, 'std.npy'))
+
+        if is_test:
+            split_file = pjoin(self.data_root, 'test.txt')
+        else:
+            split_file = pjoin(self.data_root, 'val.txt')
+
+        min_motion_len = 40 if self.dataset_name == 't2m' else 24
+        # min_motion_len = 64
+
+        joints_num = self.joints_num
+
+        data_dict = {}
+        id_list = []
+        with cs.open(split_file, 'r') as f:
+            for line in f.readlines():
+                id_list.append(line.strip())
+
+        new_name_list = []
+        length_list = []
+        for name in tqdm(id_list):
+            try:
+                motion = np.load(pjoin(self.motion_dir, name + '.npy'))
+                if (len(motion)) < min_motion_len or (len(motion) >= 200):
+                    continue
+                text_data = []
+                flag = False
+                with cs.open(pjoin(self.text_dir, name + '.txt')) as f:
+                    for line in f.readlines():
+                        text_dict = {}
+                        line_split = line.strip().split('#')
+                        caption = line_split[0]
+                        tokens = line_split[1].split(' ')
+                        f_tag = float(line_split[2])
+                        to_tag = float(line_split[3])
+                        f_tag = 0.0 if np.isnan(f_tag) else f_tag
+                        to_tag = 0.0 if np.isnan(to_tag) else to_tag
+
+                        text_dict['caption'] = caption
+                        text_dict['tokens'] = tokens
+                        if f_tag == 0.0 and to_tag == 0.0:
+                            flag = True
+                            text_data.append(text_dict)
+                        else:
+                            try:
+                                n_motion = motion[int(f_tag * fps): int(to_tag * fps)]
+                                if (len(n_motion)) < min_motion_len or (len(n_motion) >= 200):
+                                    continue
+                                new_name = random.choice('ABCDEFGHIJKLMNOPQRSTUVW') + '_' + name
+                                while new_name in data_dict:
+                                    new_name = random.choice('ABCDEFGHIJKLMNOPQRSTUVW') + '_' + name
+                                data_dict[new_name] = {'motion': n_motion,
+                                                       'length': len(n_motion),
+                                                       'text': [text_dict]}
+                                new_name_list.append(new_name)
+                                length_list.append(len(n_motion))
+                            except:
+                                print(line_split)
+                                print(line_split[2], line_split[3], f_tag, to_tag, name)
+                                # break
+
+                if flag:
+                    data_dict[name] = {'motion': motion,
+                                       'length': len(motion),
+                                       'text': text_data}
+                    new_name_list.append(name)
+                    length_list.append(len(motion))
+            except Exception as e:
+                # print(e)
+                pass
+
+        name_list, length_list = zip(*sorted(zip(new_name_list, length_list), key=lambda x: x[1]))
+        self.mean = mean
+        self.std = std
+        self.length_arr = np.array(length_list)
+        self.data_dict = data_dict
+        self.name_list = name_list
+        self.reset_max_len(self.max_length)
+
+    def reset_max_len(self, length):
+        assert length <= self.max_motion_length
+        self.pointer = np.searchsorted(self.length_arr, length)
+        print("Pointer Pointing at %d" % self.pointer)
+        self.max_length = length
+
+    def inv_transform(self, data):
+        return data * self.std + self.mean
+
+    def forward_transform(self, data):
+        return (data - self.mean) / self.std
+
+    def __len__(self):
+        return len(self.data_dict) - self.pointer
+
+    def __getitem__(self, item):
+        idx = self.pointer + item
+        name = self.name_list[idx]
+        data = self.data_dict[name]
+        # data = self.data_dict[self.name_list[idx]]
+        motion, m_length, text_list = data['motion'], data['length'], data['text']
+        # Randomly select a caption
+        text_data = random.choice(text_list)
+        caption, tokens = text_data['caption'], text_data['tokens']
+
+        if len(tokens) < self.max_text_len:
+            # pad with "unk"
+            tokens = ['sos/OTHER'] + tokens + ['eos/OTHER']
+            sent_len = len(tokens)
+            tokens = tokens + ['unk/OTHER'] * (self.max_text_len + 2 - sent_len)
+        else:
+            # crop
+            tokens = tokens[:self.max_text_len]
+            tokens = ['sos/OTHER'] + tokens + ['eos/OTHER']
+            sent_len = len(tokens)
+        pos_one_hots = []
+        word_embeddings = []
+        for token in tokens:
+            word_emb, pos_oh = self.w_vectorizer[token]
+            pos_one_hots.append(pos_oh[None, :])
+            word_embeddings.append(word_emb[None, :])
+        pos_one_hots = np.concatenate(pos_one_hots, axis=0)
+        word_embeddings = np.concatenate(word_embeddings, axis=0)
+
+        if self.unit_length < 10:
+            coin2 = np.random.choice(['single', 'single', 'double'])
+        else:
+            coin2 = 'single'
+
+        if coin2 == 'double':
+            m_length = (m_length // self.unit_length - 1) * self.unit_length
+        elif coin2 == 'single':
+            m_length = (m_length // self.unit_length) * self.unit_length
+        idx = random.randint(0, len(motion) - m_length)
+        motion = motion[idx:idx + m_length]
+
+        "Z Normalization"
+        motion = (motion - self.mean) / self.std
+
+        if m_length < self.max_motion_length:
+            motion = np.concatenate([motion,
+                                     np.zeros((self.max_motion_length - m_length, motion.shape[1]))
+                                     ], axis=0)
+
+        return word_embeddings, pos_one_hots, caption, sent_len, motion, m_length, '_'.join(tokens), name
+
+
+def collate_fn(batch):
+    batch.sort(key=lambda x: x[3], reverse=True)
+    return default_collate(batch)
+
+
+def eval_dataloader(dataset_name, is_test, batch_size, w_vectorizer, num_workers=8, unit_length=4):
+    val_loader = torch.utils.data.DataLoader(
+        Text2MotionDataset(dataset_name, is_test, w_vectorizer, unit_length=unit_length),
+        batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        collate_fn=collate_fn,
+        drop_last=True)
+    return val_loader
+
+
+#########
+# MODEL #
+#########
 class nonlinearity(nn.Module):
     def __init__(self):
         super().__init__()
@@ -626,6 +962,529 @@ class HumanVQVAE(nn.Module):
         return x_out
 
 
+########
+# EVAL #
+########
+def init_weight(m):
+    if isinstance(m, nn.Conv1d) or isinstance(m, nn.Linear) or isinstance(m, nn.ConvTranspose1d):
+        nn.init.xavier_normal_(m.weight)
+        # m.bias.data.fill_(0.01)
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+
+
+class MovementConvEncoder(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(MovementConvEncoder, self).__init__()
+        self.main = nn.Sequential(
+            nn.Conv1d(input_size, hidden_size, 4, 2, 1),
+            nn.Dropout(0.2, inplace=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv1d(hidden_size, output_size, 4, 2, 1),
+            nn.Dropout(0.2, inplace=True),
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+        self.out_net = nn.Linear(output_size, output_size)
+        self.main.apply(init_weight)
+        self.out_net.apply(init_weight)
+
+    def forward(self, inputs):
+        inputs = inputs.permute(0, 2, 1)
+        outputs = self.main(inputs).permute(0, 2, 1)
+        # print(outputs.shape)
+        return self.out_net(outputs)
+
+
+class TextEncoderBiGRUCo(nn.Module):
+    def __init__(self, word_size, pos_size, hidden_size, output_size, device):
+        super(TextEncoderBiGRUCo, self).__init__()
+        self.device = device
+
+        self.pos_emb = nn.Linear(pos_size, word_size)
+        self.input_emb = nn.Linear(word_size, hidden_size)
+        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True, bidirectional=True)
+        self.output_net = nn.Sequential(
+            nn.Linear(hidden_size * 2, hidden_size),
+            nn.LayerNorm(hidden_size),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(hidden_size, output_size)
+        )
+
+        self.input_emb.apply(init_weight)
+        self.pos_emb.apply(init_weight)
+        self.output_net.apply(init_weight)
+        self.hidden_size = hidden_size
+        self.hidden = nn.Parameter(torch.randn((2, 1, self.hidden_size), requires_grad=True))
+
+    # input(batch_size, seq_len, dim)
+    def forward(self, word_embs, pos_onehot, cap_lens):
+        num_samples = word_embs.shape[0]
+
+        pos_embs = self.pos_emb(pos_onehot)
+        inputs = word_embs + pos_embs
+        input_embs = self.input_emb(inputs)
+        hidden = self.hidden.repeat(1, num_samples, 1)
+
+        cap_lens = cap_lens.data.tolist()
+        emb = pack_padded_sequence(input_embs, cap_lens, batch_first=True)
+
+        gru_seq, gru_last = self.gru(emb, hidden)
+
+        gru_last = torch.cat([gru_last[0], gru_last[1]], dim=-1)
+
+        return self.output_net(gru_last)
+
+
+class MotionEncoderBiGRUCo(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, device):
+        super(MotionEncoderBiGRUCo, self).__init__()
+        self.device = device
+
+        self.input_emb = nn.Linear(input_size, hidden_size)
+        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True, bidirectional=True)
+        self.output_net = nn.Sequential(
+            nn.Linear(hidden_size * 2, hidden_size),
+            nn.LayerNorm(hidden_size),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(hidden_size, output_size)
+        )
+
+        self.input_emb.apply(init_weight)
+        self.output_net.apply(init_weight)
+        self.hidden_size = hidden_size
+        self.hidden = nn.Parameter(torch.randn((2, 1, self.hidden_size), requires_grad=True))
+
+    # input(batch_size, seq_len, dim)
+    def forward(self, inputs, m_lens):
+        num_samples = inputs.shape[0]
+
+        input_embs = self.input_emb(inputs)
+        hidden = self.hidden.repeat(1, num_samples, 1)
+
+        cap_lens = m_lens.data.tolist()
+        emb = pack_padded_sequence(input_embs, cap_lens, batch_first=True, enforce_sorted=False)
+
+        gru_seq, gru_last = self.gru(emb, hidden)
+
+        gru_last = torch.cat([gru_last[0], gru_last[1]], dim=-1)
+
+        return self.output_net(gru_last)
+
+
+def build_models(opt):
+    movement_enc = MovementConvEncoder(opt.dim_pose-4, opt.dim_movement_enc_hidden, opt.dim_movement_latent)
+    text_enc = TextEncoderBiGRUCo(word_size=opt.dim_word,
+                                  pos_size=opt.dim_pos_ohot,
+                                  hidden_size=opt.dim_text_hidden,
+                                  output_size=opt.dim_coemb_hidden,
+                                  device=opt.device)
+
+    motion_enc = MotionEncoderBiGRUCo(input_size=opt.dim_movement_latent,
+                                      hidden_size=opt.dim_motion_hidden,
+                                      output_size=opt.dim_coemb_hidden,
+                                      device=opt.device)
+
+    checkpoint = torch.load(pjoin(opt.checkpoints_dir, opt.dataset_name, 'text_mot_match', 'model', 'finest.tar'),
+                            map_location=opt.device)
+    movement_enc.load_state_dict(checkpoint['movement_encoder'])
+    text_enc.load_state_dict(checkpoint['text_encoder'])
+    motion_enc.load_state_dict(checkpoint['motion_encoder'])
+    print('Loading Evaluation Model Wrapper (Epoch %d) Completed!!' % (checkpoint['epoch']))
+    return text_enc, motion_enc, movement_enc
+
+
+class EvaluatorModelWrapper(object):
+
+    def __init__(self, opt):
+
+        if opt.dataset_name == 't2m':
+            opt.dim_pose = 263
+        elif opt.dataset_name == 'kit':
+            opt.dim_pose = 251
+        else:
+            raise KeyError('Dataset not Recognized!!!')
+
+        opt.dim_word = 300
+        opt.max_motion_length = 196
+        opt.dim_pos_ohot = len(POS_enumerator)
+        opt.dim_motion_hidden = 1024
+        opt.max_text_len = 20
+        opt.dim_text_hidden = 512
+        opt.dim_coemb_hidden = 512
+
+        # print(opt)
+
+        self.text_encoder, self.motion_encoder, self.movement_encoder = build_models(opt)
+        self.opt = opt
+        self.device = opt.device
+
+        self.text_encoder.to(opt.device)
+        self.motion_encoder.to(opt.device)
+        self.movement_encoder.to(opt.device)
+
+        self.text_encoder.eval()
+        self.motion_encoder.eval()
+        self.movement_encoder.eval()
+
+    # Please note that the results does not following the order of inputs
+    def get_co_embeddings(self, word_embs, pos_ohot, cap_lens, motions, m_lens):
+        with torch.no_grad():
+            word_embs = word_embs.detach().to(self.device).float()
+            pos_ohot = pos_ohot.detach().to(self.device).float()
+            motions = motions.detach().to(self.device).float()
+
+            '''Movement Encoding'''
+            movements = self.movement_encoder(motions[..., :-4]).detach()
+            m_lens = m_lens // self.opt.unit_length
+            motion_embedding = self.motion_encoder(movements, m_lens)
+
+            '''Text Encoding'''
+            text_embedding = self.text_encoder(word_embs, pos_ohot, cap_lens)
+        return text_embedding, motion_embedding
+
+    # Please note that the results does not following the order of inputs
+    def get_motion_embeddings(self, motions, m_lens):
+        with torch.no_grad():
+            motions = motions.detach().to(self.device).float()
+
+            align_idx = np.argsort(m_lens.data.tolist())[::-1].copy()
+            motions = motions[align_idx]
+            m_lens = m_lens[align_idx]
+
+            '''Movement Encoding'''
+            movements = self.movement_encoder(motions[..., :-4]).detach()
+            m_lens = m_lens // self.opt.unit_length
+            motion_embedding = self.motion_encoder(movements, m_lens)
+        return motion_embedding
+
+
+def tensorborad_add_video_xyz(writer, xyz, nb_iter, tag, nb_vis=4, title_batch=None, outname=None):
+    xyz = xyz[:1]
+    bs, seq = xyz.shape[:2]
+    xyz = xyz.reshape(bs, seq, -1, 3)
+    plot_xyz = draw_to_batch(xyz.cpu().numpy(), title_batch, outname)
+    plot_xyz = np.transpose(plot_xyz, (0, 1, 4, 2, 3))
+    writer.add_video(tag, plot_xyz, nb_iter, fps=20)
+
+
+def qrot(q, v):
+    """
+    Rotate vector(s) v about the rotation described by quaternion(s) q.
+    Expects a tensor of shape (*, 4) for q and a tensor of shape (*, 3) for v,
+    where * denotes any number of dimensions.
+    Returns a tensor of shape (*, 3).
+    """
+    assert q.shape[-1] == 4
+    assert v.shape[-1] == 3
+    assert q.shape[:-1] == v.shape[:-1]
+
+    original_shape = list(v.shape)
+    # print(q.shape)
+    q = q.contiguous().view(-1, 4)
+    v = v.contiguous().view(-1, 3)
+
+    qvec = q[:, 1:]
+    uv = torch.cross(qvec, v, dim=1)
+    uuv = torch.cross(qvec, uv, dim=1)
+    return (v + 2 * (q[:, :1] * uv + uuv)).view(original_shape)
+
+
+def qinv(q):
+    assert q.shape[-1] == 4, 'q must be a tensor of shape (*, 4)'
+    mask = torch.ones_like(q)
+    mask[..., 1:] = -mask[..., 1:]
+    return q * mask
+
+
+def recover_root_rot_pos(data):
+    rot_vel = data[..., 0]
+    r_rot_ang = torch.zeros_like(rot_vel).to(data.device)
+    '''Get Y-axis rotation from rotation velocity'''
+    r_rot_ang[..., 1:] = rot_vel[..., :-1]
+    r_rot_ang = torch.cumsum(r_rot_ang, dim=-1)
+
+    r_rot_quat = torch.zeros(data.shape[:-1] + (4,)).to(data.device)
+    r_rot_quat[..., 0] = torch.cos(r_rot_ang)
+    r_rot_quat[..., 2] = torch.sin(r_rot_ang)
+
+    r_pos = torch.zeros(data.shape[:-1] + (3,)).to(data.device)
+    r_pos[..., 1:, [0, 2]] = data[..., :-1, 1:3]
+    '''Add Y-axis rotation to root position'''
+    r_pos = qrot(qinv(r_rot_quat), r_pos)
+
+    r_pos = torch.cumsum(r_pos, dim=-2)
+
+    r_pos[..., 1] = data[..., 3]
+    return r_rot_quat, r_pos
+
+
+def recover_from_ric(data, joints_num):
+    r_rot_quat, r_pos = recover_root_rot_pos(data)
+    positions = data[..., 4:(joints_num - 1) * 3 + 4]
+    positions = positions.view(positions.shape[:-1] + (-1, 3))
+
+    '''Add Y-axis rotation to local joints'''
+    positions = qrot(qinv(r_rot_quat[..., None, :]).expand(positions.shape[:-1] + (4,)), positions)
+
+    '''Add root XZ to joints'''
+    positions[..., 0] += r_pos[..., 0:1]
+    positions[..., 2] += r_pos[..., 2:3]
+
+    '''Concate root and joints'''
+    positions = torch.cat([r_pos.unsqueeze(-2), positions], dim=-2)
+
+    return positions
+
+
+# (X - X_train)*(X - X_train) = -2X*X_train + X*X + X_train*X_train
+def euclidean_distance_matrix(matrix1, matrix2):
+    """
+        Params:
+        -- matrix1: N1 x D
+        -- matrix2: N2 x D
+        Returns:
+        -- dist: N1 x N2
+        dist[i, j] == distance(matrix1[i], matrix2[j])
+    """
+    assert matrix1.shape[1] == matrix2.shape[1]
+    d1 = -2 * np.dot(matrix1, matrix2.T)    # shape (num_test, num_train)
+    d2 = np.sum(np.square(matrix1), axis=1, keepdims=True)    # shape (num_test, 1)
+    d3 = np.sum(np.square(matrix2), axis=1)     # shape (num_train, )
+    dists = np.sqrt(d1 + d2 + d3)  # broadcasting
+    return dists
+
+
+def calculate_top_k(mat, top_k):
+    size = mat.shape[0]
+    gt_mat = np.expand_dims(np.arange(size), 1).repeat(size, 1)
+    bool_mat = (mat == gt_mat)
+    correct_vec = False
+    top_k_list = []
+    for i in range(top_k):
+        correct_vec = (correct_vec | bool_mat[:, i])
+        top_k_list.append(correct_vec[:, None])
+    top_k_mat = np.concatenate(top_k_list, axis=1)
+    return top_k_mat
+
+
+def calculate_R_precision(embedding1, embedding2, top_k, sum_all=False):
+    dist_mat = euclidean_distance_matrix(embedding1, embedding2)
+    matching_score = dist_mat.trace()
+    argmax = np.argsort(dist_mat, axis=1)
+    top_k_mat = calculate_top_k(argmax, top_k)
+    if sum_all:
+        return top_k_mat.sum(axis=0), matching_score
+    else:
+        return top_k_mat, matching_score
+
+
+def calculate_activation_statistics(activations):
+    mu = np.mean(activations, axis=0)
+    cov = np.cov(activations, rowvar=False)
+    return mu, cov
+
+
+def calculate_diversity(activation, diversity_times):
+    assert len(activation.shape) == 2
+    assert activation.shape[0] > diversity_times
+    num_samples = activation.shape[0]
+
+    first_indices = np.random.choice(num_samples, diversity_times, replace=False)
+    second_indices = np.random.choice(num_samples, diversity_times, replace=False)
+    dist = linalg.norm(activation[first_indices] - activation[second_indices], axis=1)
+    return dist.mean()
+
+
+def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
+
+    mu1 = np.atleast_1d(mu1)
+    mu2 = np.atleast_1d(mu2)
+
+    sigma1 = np.atleast_2d(sigma1)
+    sigma2 = np.atleast_2d(sigma2)
+
+    assert mu1.shape == mu2.shape, \
+        'Training and test mean vectors have different lengths'
+    assert sigma1.shape == sigma2.shape, \
+        'Training and test covariances have different dimensions'
+
+    diff = mu1 - mu2
+
+    # Product might be almost singular
+    covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
+    if not np.isfinite(covmean).all():
+        msg = ('fid calculation produces singular product; '
+               'adding %s to diagonal of cov estimates') % eps
+        print(msg)
+        offset = np.eye(sigma1.shape[0]) * eps
+        covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
+
+    # Numerical error might give slight imaginary component
+    if np.iscomplexobj(covmean):
+        if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
+            m = np.max(np.abs(covmean.imag))
+            raise ValueError('Imaginary component {}'.format(m))
+        covmean = covmean.real
+
+    tr_covmean = np.trace(covmean)
+
+    return (diff.dot(diff) + np.trace(sigma1)
+            + np.trace(sigma2) - 2 * tr_covmean)
+
+
+
+@torch.no_grad()
+def evaluation_vqvae(out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, best_top1,
+                     best_top2, best_top3, best_matching, eval_wrapper, draw=True, save=True, savegif=False,
+                     savenpy=False):
+    net.eval()
+    nb_sample = 0
+
+    draw_org = []
+    draw_pred = []
+    draw_text = []
+
+    motion_annotation_list = []
+    motion_pred_list = []
+
+    R_precision_real = 0
+    R_precision = 0
+
+    nb_sample = 0
+    matching_score_real = 0
+    matching_score_pred = 0
+    for batch in val_loader:
+        word_embeddings, pos_one_hots, caption, sent_len, motion, m_length, token, name = batch
+
+        motion = motion.cuda()
+        et, em = eval_wrapper.get_co_embeddings(word_embeddings, pos_one_hots, sent_len, motion, m_length)
+        bs, seq = motion.shape[0], motion.shape[1]
+
+        num_joints = 21 if motion.shape[-1] == 251 else 22
+
+        pred_pose_eval = torch.zeros((bs, seq, motion.shape[-1])).cuda()
+
+        for i in range(bs):
+            pose = val_loader.dataset.inv_transform(motion[i:i + 1, :m_length[i], :].detach().cpu().numpy())
+            pose_xyz = recover_from_ric(torch.from_numpy(pose).float().cuda(), num_joints)
+
+            pred_pose, loss_commit, perplexity = net(motion[i:i + 1, :m_length[i]])
+            pred_denorm = val_loader.dataset.inv_transform(pred_pose.detach().cpu().numpy())
+            pred_xyz = recover_from_ric(torch.from_numpy(pred_denorm).float().cuda(), num_joints)
+
+            if savenpy:
+                np.save(os.path.join(out_dir, name[i] + '_gt.npy'), pose_xyz[:, :m_length[i]].cpu().numpy())
+                np.save(os.path.join(out_dir, name[i] + '_pred.npy'), pred_xyz.detach().cpu().numpy())
+
+            pred_pose_eval[i:i + 1, :m_length[i], :] = pred_pose
+
+            if i < min(4, bs):
+                draw_org.append(pose_xyz)
+                draw_pred.append(pred_xyz)
+                draw_text.append(caption[i])
+
+        et_pred, em_pred = eval_wrapper.get_co_embeddings(word_embeddings, pos_one_hots, sent_len, pred_pose_eval,
+                                                          m_length)
+
+        motion_pred_list.append(em_pred)
+        motion_annotation_list.append(em)
+
+        temp_R, temp_match = calculate_R_precision(et.cpu().numpy(), em.cpu().numpy(), top_k=3, sum_all=True)
+        R_precision_real += temp_R
+        matching_score_real += temp_match
+        temp_R, temp_match = calculate_R_precision(et_pred.cpu().numpy(), em_pred.cpu().numpy(), top_k=3, sum_all=True)
+        R_precision += temp_R
+        matching_score_pred += temp_match
+
+        nb_sample += bs
+
+    motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
+    motion_pred_np = torch.cat(motion_pred_list, dim=0).cpu().numpy()
+    gt_mu, gt_cov = calculate_activation_statistics(motion_annotation_np)
+    mu, cov = calculate_activation_statistics(motion_pred_np)
+
+    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
+    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+
+    R_precision_real = R_precision_real / nb_sample
+    R_precision = R_precision / nb_sample
+
+    matching_score_real = matching_score_real / nb_sample
+    matching_score_pred = matching_score_pred / nb_sample
+
+    fid = calculate_frechet_distance(gt_mu, gt_cov, mu, cov)
+
+    msg = f"--> \t Eva. Iter {nb_iter} :, FID. {fid:.4f}, Diversity Real. {diversity_real:.4f}, Diversity. {diversity:.4f}, R_precision_real. {R_precision_real}, R_precision. {R_precision}, matching_score_real. {matching_score_real}, matching_score_pred. {matching_score_pred}"
+    logger.info(msg)
+
+    if draw:
+        writer.add_scalar('./Test/FID', fid, nb_iter)
+        writer.add_scalar('./Test/Diversity', diversity, nb_iter)
+        writer.add_scalar('./Test/top1', R_precision[0], nb_iter)
+        writer.add_scalar('./Test/top2', R_precision[1], nb_iter)
+        writer.add_scalar('./Test/top3', R_precision[2], nb_iter)
+        writer.add_scalar('./Test/matching_score', matching_score_pred, nb_iter)
+
+        if nb_iter % 5000 == 0:
+            for ii in range(4):
+                tensorborad_add_video_xyz(writer, draw_org[ii], nb_iter, tag='./Vis/org_eval' + str(ii), nb_vis=1,
+                                          title_batch=[draw_text[ii]],
+                                          outname=[os.path.join(out_dir, 'gt' + str(ii) + '.gif')] if savegif else None)
+
+        if nb_iter % 5000 == 0:
+            for ii in range(4):
+                tensorborad_add_video_xyz(writer, draw_pred[ii], nb_iter, tag='./Vis/pred_eval' + str(ii), nb_vis=1,
+                                          title_batch=[draw_text[ii]], outname=[
+                        os.path.join(out_dir, 'pred' + str(ii) + '.gif')] if savegif else None)
+
+    if fid < best_fid:
+        msg = f"--> --> \t FID Improved from {best_fid:.5f} to {fid:.5f} !!!"
+        logger.info(msg)
+        best_fid, best_iter = fid, nb_iter
+        if save:
+            torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
+
+    if abs(diversity_real - diversity) < abs(diversity_real - best_div):
+        msg = f"--> --> \t Diversity Improved from {best_div:.5f} to {diversity:.5f} !!!"
+        logger.info(msg)
+        best_div = diversity
+        if save:
+            torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_best_div.pth'))
+
+    if R_precision[0] > best_top1:
+        msg = f"--> --> \t Top1 Improved from {best_top1:.4f} to {R_precision[0]:.4f} !!!"
+        logger.info(msg)
+        best_top1 = R_precision[0]
+        if save:
+            torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_best_top1.pth'))
+
+    if R_precision[1] > best_top2:
+        msg = f"--> --> \t Top2 Improved from {best_top2:.4f} to {R_precision[1]:.4f} !!!"
+        logger.info(msg)
+        best_top2 = R_precision[1]
+
+    if R_precision[2] > best_top3:
+        msg = f"--> --> \t Top3 Improved from {best_top3:.4f} to {R_precision[2]:.4f} !!!"
+        logger.info(msg)
+        best_top3 = R_precision[2]
+
+    if matching_score_pred < best_matching:
+        msg = f"--> --> \t matching_score Improved from {best_matching:.5f} to {matching_score_pred:.5f} !!!"
+        logger.info(msg)
+        best_matching = matching_score_pred
+        if save:
+            torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_best_matching.pth'))
+
+    if save:
+        torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_last.pth'))
+
+    net.train()
+    return best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger
+
+
+##########
+# HELPER #
+##########
 def get_logger(out_dir):
     logger = logging.getLogger('Exp')
     logger.setLevel(logging.INFO)
@@ -732,6 +1591,9 @@ def update_lr_warm_up(optimizer, nb_iter, warm_up_iter, lr):
     return optimizer, current_lr
 
 
+########
+# LOSS #
+########
 class ReConsLoss(nn.Module):
     def __init__(self, recons_loss, nb_joints):
         super(ReConsLoss, self).__init__()
@@ -774,7 +1636,7 @@ if '__main__' == __name__:
     writer = SummaryWriter(args.out_dir)
     logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
 
-    #w_vectorizer = WordVectorizer('./glove', 'our_vab')
+    w_vectorizer = WordVectorizer('./glove', 'our_vab')
 
     dataset_opt_path = 'checkpoints/t2m/Comp_v6_KLD005/opt.txt'
     args.nb_joints = 22
@@ -782,7 +1644,7 @@ if '__main__' == __name__:
     logger.info(f'Training on {args.dataname}, motions are with {args.nb_joints} joints')
 
     wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
-    #eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
+    eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
 
     # dataloader
     train_loader = motion_dataloader(
@@ -790,15 +1652,17 @@ if '__main__' == __name__:
         window_size=args.window_size,
         unit_length=2 ** args.down_t,
         debug=False,
-        overfit=True
+        overfit=False
     )
 
     train_loader_iter = cycle(train_loader)
 
-    #val_loader = dataset_TM_eval.DATALoader(args.dataname, False,
-    #                                        32,
-    #                                        w_vectorizer,
-    #                                        unit_length=2 ** args.down_t)
+    val_loader = eval_dataloader(
+        args.dataname,
+        False, 32,
+        w_vectorizer,
+        unit_length=2 ** args.down_t
+    )
 
     # network
     net = HumanVQVAE(
@@ -865,6 +1729,10 @@ if '__main__' == __name__:
 
     # train
     avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
+    best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = evaluation_vqvae(
+        args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, best_top1=0,
+        best_top2=0, best_top3=0, best_matching=100, eval_wrapper=eval_wrapper)
+
     for nb_iter in range(1, args.total_iter + 1):
         gt_motion = next(train_loader_iter)
         gt_motion = gt_motion.cuda().float()  # bs, nb_joints, joints_dim, seq_len
@@ -897,4 +1765,9 @@ if '__main__' == __name__:
                 f"Train. Iter {nb_iter} : \t Commit. {avg_commit:.5f} \t PPL. {avg_perplexity:.2f} \t Recons.  {avg_recons:.5f}")
 
             avg_recons, avg_perplexity, avg_commit = 0., 0., 0.,
+
+        if nb_iter % args.eval_iter == 0:
+            best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = evaluation_vqvae(
+                args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, best_top1,
+                best_top2, best_top3, best_matching, eval_wrapper=eval_wrapper)
 

@@ -14,6 +14,11 @@ pip install -e .
 ```
 Note: ensure `libboost-dev`, `gcc`, `g++` are installed on your system.
 
+You will need to either download and process your own copy of HumanML3D or mount:
+```angular2html
+'/media/varora/LaCie/Datasets/HumanML3D/HumanML3D/'
+```
+
 ## TO-DO
 - [x] Download HumanML3D dataset
 - [x] Visualize HumanML3D dataset
@@ -23,6 +28,26 @@ Note: ensure `libboost-dev`, `gcc`, `g++` are installed on your system.
 - [ ] Visualize reconstructions of model trained on whole HumanML3D dataset
 - [ ] Train a masked autoencoder on top of the learnt motion codebook
 
+## Notes
+- Issue:
+    ```angular2html
+    ModuleNotFoundError: No module named 'mpl_toolkits'
+    ```
+    Solution:
+    ```angular2html
+    pip install basemap
+    ```
+- Issue
+  ```angular2html
+  ax.lines = []
+  AttributeError: can't set attribute
+  ```
+  Solution:
+  ```angular2html
+  conda env create -f environment_t2m.yml 
+  conda activate T2M-GPT
+  ```
+  
 ## Dataset
 Using the [HumanML3D](https://openaccess.thecvf.com/content/CVPR2022/papers/Guo_Generating_Diverse_and_Natural_3D_Human_Motions_From_Text_CVPR_2022_paper.pdf) 
 data: a 3D human motion-language dataset that originates from a combination of HumanAct12 and Amass dataset. Follow the 
