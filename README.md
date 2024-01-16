@@ -17,7 +17,10 @@ Note: ensure `libboost-dev`, `gcc`, `g++` are installed on your system.
 ## TO-DO
 - [x] Download HumanML3D dataset
 - [x] Visualize HumanML3D dataset
-- [ ] Train a VQ-GAN codebook and visualize reconstructions
+- [x] Overfit a VQVAE codebook on a single sample
+- [ ] Visualize reconstructions of overfitted VQVAE
+- [ ] Train a VQVAE on whole HumanML3D dataset
+- [ ] Visualize reconstructions of model trained on whole HumanML3D dataset
 - [ ] Train a masked autoencoder on top of the learnt motion codebook
 
 ## Dataset
