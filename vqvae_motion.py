@@ -331,7 +331,7 @@ class VQMotionDataset(data.Dataset):
             for line in f.readlines():
                 id_list.append(line.strip())
 
-        assert int(debug) + int(overfit) == 1, "Use either debug mode or overfit mode, not both."
+        assert int(debug) + int(overfit) <= 1, "Use either debug mode or overfit mode, not both."
         if debug:
             id_list = id_list[:200]
         if overfit:
