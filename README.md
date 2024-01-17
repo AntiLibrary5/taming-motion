@@ -25,7 +25,7 @@ You will need to either download and process your own copy of HumanML3D or mount
 - [x] Overfit a VQVAE codebook on a single sample
 - [ ] Visualize reconstructions of overfitted VQVAE
 - [x] Train a VQVAE on whole HumanML3D dataset
-- [ ] Visualize reconstructions of model trained on whole HumanML3D dataset
+- [x] Visualize reconstructions of model trained on whole HumanML3D dataset
 - [ ] Train a masked autoencoder on top of the learnt motion codebook
 
 # Results/Updates

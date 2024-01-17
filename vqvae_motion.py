@@ -100,6 +100,8 @@ def get_args_parser():
     parser.add_argument('--vis-gt', action='store_true', help='whether visualize GT motions')
     parser.add_argument('--nb-vis', default=20, type=int, help='nb of visualizations')
 
+    parser.add_argument('--eval', action='store_true', help='eval only and no training')
+
     return parser.parse_args()
 
 
@@ -159,8 +161,9 @@ def plot_3d_motion(args, figsize=(10, 10), fps=120, radius=4):
         if title is not None:
             wraped_title = '\n'.join(wrap(title, 40))
             fig.suptitle(wraped_title, fontsize=16)
+        #ax = p3.Axes3D(fig, auto_add_to_figure=False)
+        #fig.add_axes(ax)
         ax = p3.Axes3D(fig)
-
         init()
 
         ax.lines = []
@@ -1291,6 +1294,10 @@ def calculate_diversity(activation, diversity_times):
 
     first_indices = np.random.choice(num_samples, diversity_times, replace=False)
     second_indices = np.random.choice(num_samples, diversity_times, replace=False)
+
+    if np.any(np.isnan(first_indices)) or np.any(np.isnan(second_indices)) or \
+            np.any(np.isinf(first_indices)) or np.any(np.isinf(second_indices)):
+        return 0.0
     dist = linalg.norm(activation[first_indices] - activation[second_indices], axis=1)
     return dist.mean()
 
@@ -1309,6 +1316,10 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
         'Training and test covariances have different dimensions'
 
     diff = mu1 - mu2
+
+    if np.any(np.isnan(sigma1)) or np.any(np.isnan(sigma2)) or \
+            np.any(np.isinf(sigma1)) or np.any(np.isinf(sigma2)):
+        return 0.0
 
     # Product might be almost singular
     covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
@@ -1339,6 +1350,8 @@ def evaluation_vqvae(out_dir, val_loader, net, logger, writer, nb_iter, best_fid
                      savenpy=False):
     net.eval()
     nb_sample = 0
+
+    vis_only=True
 
     draw_org = []
     draw_pred = []
@@ -1398,32 +1411,34 @@ def evaluation_vqvae(out_dir, val_loader, net, logger, writer, nb_iter, best_fid
 
         nb_sample += bs
 
-    motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
-    motion_pred_np = torch.cat(motion_pred_list, dim=0).cpu().numpy()
-    gt_mu, gt_cov = calculate_activation_statistics(motion_annotation_np)
-    mu, cov = calculate_activation_statistics(motion_pred_np)
+    if not vis_only:
+        motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
+        motion_pred_np = torch.cat(motion_pred_list, dim=0).cpu().numpy()
+        gt_mu, gt_cov = calculate_activation_statistics(motion_annotation_np)
+        mu, cov = calculate_activation_statistics(motion_pred_np)
 
-    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+        diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
+        diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
 
-    R_precision_real = R_precision_real / nb_sample
-    R_precision = R_precision / nb_sample
+        R_precision_real = R_precision_real / nb_sample
+        R_precision = R_precision / nb_sample
 
-    matching_score_real = matching_score_real / nb_sample
-    matching_score_pred = matching_score_pred / nb_sample
+        matching_score_real = matching_score_real / nb_sample
+        matching_score_pred = matching_score_pred / nb_sample
 
-    fid = calculate_frechet_distance(gt_mu, gt_cov, mu, cov)
+        fid = calculate_frechet_distance(gt_mu, gt_cov, mu, cov)
 
-    msg = f"--> \t Eva. Iter {nb_iter} :, FID. {fid:.4f}, Diversity Real. {diversity_real:.4f}, Diversity. {diversity:.4f}, R_precision_real. {R_precision_real}, R_precision. {R_precision}, matching_score_real. {matching_score_real}, matching_score_pred. {matching_score_pred}"
-    logger.info(msg)
+        msg = f"--> \t Eva. Iter {nb_iter} :, FID. {fid:.4f}, Diversity Real. {diversity_real:.4f}, Diversity. {diversity:.4f}, R_precision_real. {R_precision_real}, R_precision. {R_precision}, matching_score_real. {matching_score_real}, matching_score_pred. {matching_score_pred}"
+        logger.info(msg)
 
     if draw:
-        writer.add_scalar('./Test/FID', fid, nb_iter)
-        writer.add_scalar('./Test/Diversity', diversity, nb_iter)
-        writer.add_scalar('./Test/top1', R_precision[0], nb_iter)
-        writer.add_scalar('./Test/top2', R_precision[1], nb_iter)
-        writer.add_scalar('./Test/top3', R_precision[2], nb_iter)
-        writer.add_scalar('./Test/matching_score', matching_score_pred, nb_iter)
+        if not vis_only:
+            writer.add_scalar('./Test/FID', fid, nb_iter)
+            writer.add_scalar('./Test/Diversity', diversity, nb_iter)
+            writer.add_scalar('./Test/top1', R_precision[0], nb_iter)
+            writer.add_scalar('./Test/top2', R_precision[1], nb_iter)
+            writer.add_scalar('./Test/top3', R_precision[2], nb_iter)
+            writer.add_scalar('./Test/matching_score', matching_score_pred, nb_iter)
 
         if nb_iter % 5000 == 0:
             for ii in range(4):
@@ -1437,43 +1452,44 @@ def evaluation_vqvae(out_dir, val_loader, net, logger, writer, nb_iter, best_fid
                                           title_batch=[draw_text[ii]], outname=[
                         os.path.join(out_dir, 'pred' + str(ii) + '.gif')] if savegif else None)
 
-    if fid < best_fid:
-        msg = f"--> --> \t FID Improved from {best_fid:.5f} to {fid:.5f} !!!"
-        logger.info(msg)
-        best_fid, best_iter = fid, nb_iter
-        if save:
-            torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
+    if not vis_only:
+        if fid < best_fid:
+            msg = f"--> --> \t FID Improved from {best_fid:.5f} to {fid:.5f} !!!"
+            logger.info(msg)
+            best_fid, best_iter = fid, nb_iter
+            if save:
+                torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
 
-    if abs(diversity_real - diversity) < abs(diversity_real - best_div):
-        msg = f"--> --> \t Diversity Improved from {best_div:.5f} to {diversity:.5f} !!!"
-        logger.info(msg)
-        best_div = diversity
-        if save:
-            torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_best_div.pth'))
+        if abs(diversity_real - diversity) < abs(diversity_real - best_div):
+            msg = f"--> --> \t Diversity Improved from {best_div:.5f} to {diversity:.5f} !!!"
+            logger.info(msg)
+            best_div = diversity
+            if save:
+                torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_best_div.pth'))
 
-    if R_precision[0] > best_top1:
-        msg = f"--> --> \t Top1 Improved from {best_top1:.4f} to {R_precision[0]:.4f} !!!"
-        logger.info(msg)
-        best_top1 = R_precision[0]
-        if save:
-            torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_best_top1.pth'))
+        if R_precision[0] > best_top1:
+            msg = f"--> --> \t Top1 Improved from {best_top1:.4f} to {R_precision[0]:.4f} !!!"
+            logger.info(msg)
+            best_top1 = R_precision[0]
+            if save:
+                torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_best_top1.pth'))
 
-    if R_precision[1] > best_top2:
-        msg = f"--> --> \t Top2 Improved from {best_top2:.4f} to {R_precision[1]:.4f} !!!"
-        logger.info(msg)
-        best_top2 = R_precision[1]
+        if R_precision[1] > best_top2:
+            msg = f"--> --> \t Top2 Improved from {best_top2:.4f} to {R_precision[1]:.4f} !!!"
+            logger.info(msg)
+            best_top2 = R_precision[1]
 
-    if R_precision[2] > best_top3:
-        msg = f"--> --> \t Top3 Improved from {best_top3:.4f} to {R_precision[2]:.4f} !!!"
-        logger.info(msg)
-        best_top3 = R_precision[2]
+        if R_precision[2] > best_top3:
+            msg = f"--> --> \t Top3 Improved from {best_top3:.4f} to {R_precision[2]:.4f} !!!"
+            logger.info(msg)
+            best_top3 = R_precision[2]
 
-    if matching_score_pred < best_matching:
-        msg = f"--> --> \t matching_score Improved from {best_matching:.5f} to {matching_score_pred:.5f} !!!"
-        logger.info(msg)
-        best_matching = matching_score_pred
-        if save:
-            torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_best_matching.pth'))
+        if matching_score_pred < best_matching:
+            msg = f"--> --> \t matching_score Improved from {best_matching:.5f} to {matching_score_pred:.5f} !!!"
+            logger.info(msg)
+            best_matching = matching_score_pred
+            if save:
+                torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_best_matching.pth'))
 
     if save:
         torch.save({'net': net.state_dict()}, os.path.join(out_dir, 'net_last.pth'))
@@ -1628,146 +1644,223 @@ if '__main__' == __name__:
     args = get_args_parser()
     torch.manual_seed(args.seed)
 
-    args.out_dir = os.path.join(args.out_dir, f'{args.exp_name}')
-    os.makedirs(args.out_dir, exist_ok=True)
+    if not args.eval:
+        args.out_dir = os.path.join(args.out_dir, f'{args.exp_name}')
+        os.makedirs(args.out_dir, exist_ok=True)
 
-    # logger
-    logger = get_logger(args.out_dir)
-    writer = SummaryWriter(args.out_dir)
-    logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
+        # logger
+        logger = get_logger(args.out_dir)
+        writer = SummaryWriter(args.out_dir)
+        logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
 
-    w_vectorizer = WordVectorizer('./glove', 'our_vab')
+        w_vectorizer = WordVectorizer('./glove', 'our_vab')
 
-    dataset_opt_path = 'checkpoints/t2m/Comp_v6_KLD005/opt.txt'
-    args.nb_joints = 22
+        dataset_opt_path = 'checkpoints/t2m/Comp_v6_KLD005/opt.txt'
+        args.nb_joints = 22
 
-    logger.info(f'Training on {args.dataname}, motions are with {args.nb_joints} joints')
+        logger.info(f'Training on {args.dataname}, motions are with {args.nb_joints} joints')
 
-    wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
-    eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
+        wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
+        eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
 
-    # dataloader
-    train_loader = motion_dataloader(
-        args.batch_size,
-        window_size=args.window_size,
-        unit_length=2 ** args.down_t,
-        debug=False,
-        overfit=False
-    )
+        # dataloader
+        train_loader = motion_dataloader(
+            args.batch_size,
+            window_size=args.window_size,
+            unit_length=2 ** args.down_t,
+            debug=False,
+            overfit=False
+        )
 
-    train_loader_iter = cycle(train_loader)
+        train_loader_iter = cycle(train_loader)
 
-    val_loader = eval_dataloader(
-        args.dataname,
-        False, 32,
-        w_vectorizer,
-        unit_length=2 ** args.down_t
-    )
+        val_loader = eval_dataloader(
+            args.dataname,
+            False, 32,
+            w_vectorizer,
+            unit_length=2 ** args.down_t
+        )
 
-    # network
-    net = HumanVQVAE(
-       args,  ## use args to define different parameters in different quantizers
-       args.nb_code,
-       args.code_dim,
-       args.output_emb_width,
-       args.down_t,
-       args.stride_t,
-       args.width,
-       args.depth,
-       args.dilation_growth_rate,
-       args.vq_act,
-       args.vq_norm
-    )
+        # network
+        net = HumanVQVAE(
+           args,  ## use args to define different parameters in different quantizers
+           args.nb_code,
+           args.code_dim,
+           args.output_emb_width,
+           args.down_t,
+           args.stride_t,
+           args.width,
+           args.depth,
+           args.dilation_growth_rate,
+           args.vq_act,
+           args.vq_norm
+        )
 
-    if args.resume_pth:
-        logger.info('loading checkpoint from {}'.format(args.resume_pth))
-        ckpt = torch.load(args.resume_pth, map_location='cpu')
-        net.load_state_dict(ckpt['net'], strict=True)
+        if args.resume_pth:
+            logger.info('loading checkpoint from {}'.format(args.resume_pth))
+            ckpt = torch.load(args.resume_pth, map_location='cpu')
+            net.load_state_dict(ckpt['net'], strict=True)
 
-    net.train()
-    net.cuda()
+        net.train()
+        net.cuda()
 
-    # optimizer and scheduler
-    optimizer = optim.AdamW(net.parameters(), lr=args.lr, betas=(0.9, 0.99), weight_decay=args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_scheduler, gamma=args.gamma)
+        # optimizer and scheduler
+        optimizer = optim.AdamW(net.parameters(), lr=args.lr, betas=(0.9, 0.99), weight_decay=args.weight_decay)
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_scheduler, gamma=args.gamma)
 
-    # loss
-    Loss = ReConsLoss(args.recons_loss, args.nb_joints)
+        # loss
+        Loss = ReConsLoss(args.recons_loss, args.nb_joints)
 
-    # warm-up
-    avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
-    for nb_iter in range(1, args.warm_up_iter):
+        # warm-up
+        avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
+        for nb_iter in range(1, args.warm_up_iter):
 
-        optimizer, current_lr = update_lr_warm_up(optimizer, nb_iter, args.warm_up_iter, args.lr)
+            optimizer, current_lr = update_lr_warm_up(optimizer, nb_iter, args.warm_up_iter, args.lr)
 
-        gt_motion = next(train_loader_iter)
-        gt_motion = gt_motion.cuda().float()  # (bs, 64, dim)
+            gt_motion = next(train_loader_iter)
+            gt_motion = gt_motion.cuda().float()  # (bs, 64, dim)
 
-        pred_motion, loss_commit, perplexity = net(gt_motion)
-        loss_motion = Loss(pred_motion, gt_motion)
-        loss_vel = Loss.forward_vel(pred_motion, gt_motion)
+            pred_motion, loss_commit, perplexity = net(gt_motion)
+            loss_motion = Loss(pred_motion, gt_motion)
+            loss_vel = Loss.forward_vel(pred_motion, gt_motion)
 
-        loss = loss_motion + args.commit * loss_commit + args.loss_vel * loss_vel
+            loss = loss_motion + args.commit * loss_commit + args.loss_vel * loss_vel
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        avg_recons += loss_motion.item()
-        avg_perplexity += perplexity.item()
-        avg_commit += loss_commit.item()
+            avg_recons += loss_motion.item()
+            avg_perplexity += perplexity.item()
+            avg_commit += loss_commit.item()
 
-        if nb_iter % args.print_iter == 0:
-            avg_recons /= args.print_iter
-            avg_perplexity /= args.print_iter
-            avg_commit /= args.print_iter
+            if nb_iter % args.print_iter == 0:
+                avg_recons /= args.print_iter
+                avg_perplexity /= args.print_iter
+                avg_commit /= args.print_iter
 
-            logger.info(
-                f"Warmup. Iter {nb_iter} :  lr {current_lr:.5f} \t Commit. {avg_commit:.5f} \t PPL. {avg_perplexity:.2f} \t Recons.  {avg_recons:.5f}")
+                logger.info(
+                    f"Warmup. Iter {nb_iter} :  lr {current_lr:.5f} \t Commit. {avg_commit:.5f} \t PPL. {avg_perplexity:.2f} \t Recons.  {avg_recons:.5f}")
 
-            avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
+                avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
 
-    # train
-    avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
-    best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = evaluation_vqvae(
-        args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, best_top1=0,
-        best_top2=0, best_top3=0, best_matching=100, eval_wrapper=eval_wrapper)
+        # train
+        avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
+        best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = evaluation_vqvae(
+            args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, best_top1=0,
+            best_top2=0, best_top3=0, best_matching=100, eval_wrapper=eval_wrapper)
 
-    for nb_iter in range(1, args.total_iter + 1):
-        gt_motion = next(train_loader_iter)
-        gt_motion = gt_motion.cuda().float()  # bs, nb_joints, joints_dim, seq_len
+        for nb_iter in range(1, args.total_iter + 1):
+            gt_motion = next(train_loader_iter)
+            gt_motion = gt_motion.cuda().float()  # bs, nb_joints, joints_dim, seq_len
 
-        pred_motion, loss_commit, perplexity = net(gt_motion)
-        loss_motion = Loss(pred_motion, gt_motion)
-        loss_vel = Loss.forward_vel(pred_motion, gt_motion)
+            pred_motion, loss_commit, perplexity = net(gt_motion)
+            loss_motion = Loss(pred_motion, gt_motion)
+            loss_vel = Loss.forward_vel(pred_motion, gt_motion)
 
-        loss = loss_motion + args.commit * loss_commit + args.loss_vel * loss_vel
+            loss = loss_motion + args.commit * loss_commit + args.loss_vel * loss_vel
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        scheduler.step()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
 
-        avg_recons += loss_motion.item()
-        avg_perplexity += perplexity.item()
-        avg_commit += loss_commit.item()
+            avg_recons += loss_motion.item()
+            avg_perplexity += perplexity.item()
+            avg_commit += loss_commit.item()
 
-        if nb_iter % args.print_iter == 0:
-            avg_recons /= args.print_iter
-            avg_perplexity /= args.print_iter
-            avg_commit /= args.print_iter
+            if nb_iter % args.print_iter == 0:
+                avg_recons /= args.print_iter
+                avg_perplexity /= args.print_iter
+                avg_commit /= args.print_iter
 
-            writer.add_scalar('./Train/L1', avg_recons, nb_iter)
-            writer.add_scalar('./Train/PPL', avg_perplexity, nb_iter)
-            writer.add_scalar('./Train/Commit', avg_commit, nb_iter)
+                writer.add_scalar('./Train/L1', avg_recons, nb_iter)
+                writer.add_scalar('./Train/PPL', avg_perplexity, nb_iter)
+                writer.add_scalar('./Train/Commit', avg_commit, nb_iter)
 
-            logger.info(
-                f"Train. Iter {nb_iter} : \t Commit. {avg_commit:.5f} \t PPL. {avg_perplexity:.2f} \t Recons.  {avg_recons:.5f}")
+                logger.info(
+                    f"Train. Iter {nb_iter} : \t Commit. {avg_commit:.5f} \t PPL. {avg_perplexity:.2f} \t Recons.  {avg_recons:.5f}")
 
-            avg_recons, avg_perplexity, avg_commit = 0., 0., 0.,
+                avg_recons, avg_perplexity, avg_commit = 0., 0., 0.,
 
-        if nb_iter % args.eval_iter == 0:
+            if nb_iter % args.eval_iter == 0:
+                best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = evaluation_vqvae(
+                    args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, best_top1,
+                    best_top2, best_top3, best_matching, eval_wrapper=eval_wrapper)
+    else:
+        torch.manual_seed(args.seed)
+
+        args.out_dir = os.path.join(args.out_dir, f'{args.exp_name}')
+        os.makedirs(args.out_dir, exist_ok=True)
+
+        ##### ---- Logger ---- #####
+        logger = get_logger(args.out_dir)
+        writer = SummaryWriter(args.out_dir)
+        logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
+
+        w_vectorizer = WordVectorizer('./glove', 'our_vab')
+
+        dataset_opt_path = 'checkpoints/t2m/Comp_v6_KLD005/opt.txt'
+
+        wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
+        eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
+
+        ##### ---- Dataloader ---- #####
+        args.nb_joints = 21 if args.dataname == 'kit' else 22
+
+        val_loader = eval_dataloader(args.dataname, True, 32, w_vectorizer, unit_length=2 ** args.down_t)
+
+        ##### ---- Network ---- #####
+        net = HumanVQVAE(args,  ## use args to define different parameters in different quantizers
+                               args.nb_code,
+                               args.code_dim,
+                               args.output_emb_width,
+                               args.down_t,
+                               args.stride_t,
+                               args.width,
+                               args.depth,
+                               args.dilation_growth_rate,
+                               args.vq_act,
+                               args.vq_norm)
+
+        if args.resume_pth:
+            logger.info('loading checkpoint from {}'.format(args.resume_pth))
+            ckpt = torch.load(args.resume_pth, map_location='cpu')
+            net.load_state_dict(ckpt['net'], strict=True)
+        net.train()
+        net.cuda()
+
+        fid = []
+        div = []
+        top1 = []
+        top2 = []
+        top3 = []
+        matching = []
+        repeat_time = 20
+        for i in range(repeat_time):
             best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = evaluation_vqvae(
-                args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, best_top1,
-                best_top2, best_top3, best_matching, eval_wrapper=eval_wrapper)
+                args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, best_top1=0,
+                best_top2=0, best_top3=0, best_matching=100, eval_wrapper=eval_wrapper, draw=True, save=False, savegif=True,
+                savenpy=(i == 0))
+            fid.append(best_fid)
+            div.append(best_div)
+            top1.append(best_top1)
+            top2.append(best_top2)
+            top3.append(best_top3)
+            matching.append(best_matching)
+        print('final result:')
+        print('fid: ', sum(fid) / repeat_time)
+        print('div: ', sum(div) / repeat_time)
+        print('top1: ', sum(top1) / repeat_time)
+        print('top2: ', sum(top2) / repeat_time)
+        print('top3: ', sum(top3) / repeat_time)
+        print('matching: ', sum(matching) / repeat_time)
 
+        fid = np.array(fid)
+        div = np.array(div)
+        top1 = np.array(top1)
+        top2 = np.array(top2)
+        top3 = np.array(top3)
+        matching = np.array(matching)
+        msg_final = f"FID. {np.mean(fid):.3f}, conf. {np.std(fid) * 1.96 / np.sqrt(repeat_time):.3f}, Diversity. {np.mean(div):.3f}, conf. {np.std(div) * 1.96 / np.sqrt(repeat_time):.3f}, TOP1. {np.mean(top1):.3f}, conf. {np.std(top1) * 1.96 / np.sqrt(repeat_time):.3f}, TOP2. {np.mean(top2):.3f}, conf. {np.std(top2) * 1.96 / np.sqrt(repeat_time):.3f}, TOP3. {np.mean(top3):.3f}, conf. {np.std(top3) * 1.96 / np.sqrt(repeat_time):.3f}, Matching. {np.mean(matching):.3f}, conf. {np.std(matching) * 1.96 / np.sqrt(repeat_time):.3f}"
+        logger.info(msg_final)
