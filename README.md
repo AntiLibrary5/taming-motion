@@ -14,6 +14,12 @@ pip install -e .
 ```
 Note: ensure `libboost-dev`, `gcc`, `g++` are installed on your system.
 
+### Using SMPL models
+
+Since the SMPL fmaily of models require a licence agrrement, there is no automatic script to download them. Please follow the instructions in the [smplx](https://github.com/vchoutas/smplx#loading-smpl-x-smplh-and-smpl) repository to do so.
+
+NB: If you have access to a local inria machine (with acess to the LaaCie data depot) a ready to use folder can be found in **/home/adakri/varora_lacies/LaCie/Models**.
+
 ### TO-DO
 - [x] Download HumanML3D dataset
 - [ ] Visualize HumanML3D dataset
