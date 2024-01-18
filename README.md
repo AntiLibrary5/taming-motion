@@ -75,3 +75,24 @@ Data directory: `/media/varora/LaCie1/Datasets/HumanML3D/`
 <img src="assets/data/gifs/000006.gif" width="25%" height="25%"/>
 <img src="assets/data/gifs/000007.gif" width="25%" height="25%"/>
 <img src="assets/data/gifs/000008.gif" width="25%" height="25%"/>
+
+## Train VQVAE
+```angular2html
+python vqvae_motion.py --batch-size 256 --lr 2e-4 --total-iter 300000 --lr-scheduler 200000 --nb-code 512 --down-t 2 --depth 3 --dilation-growth-rate 3 --out-dir output --dataname t2m --vq-act relu --loss-vel 0.5 --recons-loss l1_smooth --exp-name motion-vqvae
+```
+Trained model: https://mybox.inria.fr/f/ef138f165e51480d8c53/?dl=1
+
+## Eval VQVAE
+```angular2html
+python vqvae_motion.py --batch-size 256 --lr 2e-4 --total-iter 300000 --lr-scheduler 200000 --nb-code 512 --down-t 2 --depth 3 --dilation-growth-rate 3 --out-dir output --dataname t2m --vq-act relu --quantizer ema_reset --loss-vel 0.5 --recons-loss l1_smooth --exp-name motion-vqvae-test --resume-pth output/motion-vqvae/net_last.pth --eval
+```
+
+## Train GM3
+```angular2html
+python gm3.py --mask_ratio 0.6 --batch-size 256 --lr 2e-4 --total-iter 250000 --lr-scheduler 200000 --nb-code 512 --down-t 2 --depth 3 --dilation-growth-rate 3 --out-dir output --dataname t2m --vq-act relu --quantizer ema_reset --loss-vel 0.5 --recons-loss l1_smooth --exp-name gm3-train --resume-pth output/motion-vqvae/net_last.pth
+```
+
+## Visualize Results
+```angular2html
+tensorboard --logdir=<EXP-NAME>
+```
