@@ -31,10 +31,22 @@ You will need to either download and process your own copy of HumanML3D or mount
 - [x] Visualize HumanML3D dataset
 - [x] Overfit a VQVAE codebook on a single sample
 - [ ] Visualize reconstructions of overfitted VQVAE
+<<<<<<< HEAD
 - [ ] Train a VQVAE on whole HumanML3D dataset
 - [ ] Visualize reconstructions of model trained on whole HumanML3D dataset
 - [ ] Train a masked autoencoder on top of the learnt motion codebook
 
+=======
+- [x] Train a VQVAE on whole HumanML3D dataset
+- [x] Visualize reconstructions of model trained on whole HumanML3D dataset
+- [ ] Train a masked autoencoder on top of the learnt motion codebook
+
+# Results/Updates
+```angular2html
+https://gitlab.inria.fr/varora/taming-motion/-/issues/2
+```
+
+>>>>>>> ab32bc303df557121f8d0068daa4c2f18a34b8ce
 ## Notes
 - Issue:
     ```angular2html
