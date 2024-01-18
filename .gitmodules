@@ -1,0 +1,3 @@
+[submodule "motion/render/joints2smpl"]
+	path = motion/render/joints2smpl
+	url = https://github.com/adakri/joints2smpl.git
