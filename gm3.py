@@ -108,3 +108,6 @@ for nb_iter in range(1, args.total_iter + 1):
             f"Loss: {avg_recons_loss:0.4f} "
             f"LR: {lr_scheduler.get_last_lr()[0]:0.6f}"
         )
+print("Finished. Saving Model.")
+torch.save({'net': m3.state_dict()}, os.path.join(args.out_dir, 'net_last.pth'))
+print("Done.")
