@@ -55,7 +55,7 @@ if args.resume_pth:
 vqvae.eval()
 vqvae.cuda()
 
-m3 = MMM()
+m3 = MMM(mask_ratio=args.mask_ratio)
 m3.train()
 m3.cuda()
 

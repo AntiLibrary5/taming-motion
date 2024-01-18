@@ -101,6 +101,7 @@ def get_args_parser():
     parser.add_argument('--nb-vis', default=20, type=int, help='nb of visualizations')
 
     parser.add_argument('--eval', action='store_true', help='eval only and no training')
+    parser.add_argument("--mask_ratio", type=float, default=0.7, help="exponential moving average to update the codebook")
 
     return parser.parse_args()
 

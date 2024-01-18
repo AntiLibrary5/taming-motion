@@ -1,12 +1,8 @@
 import torch
-import torch.nn as nn
-
 torch.backends.cuda.matmul.allow_tf32 = True  # for gpu >= Ampere and pytorch >= 1.12
 from functools import partial
-
 import torch
 import torch.nn as nn
-import numpy as np
 
 from itertools import repeat
 import collections.abc
@@ -213,46 +209,6 @@ class Block(nn.Module):
         return x
 
 
-class CrossAttention(nn.Module):
-
-    def __init__(self, dim, rope=None, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.):
-        super().__init__()
-        self.num_heads = num_heads
-        head_dim = dim // num_heads
-        self.scale = head_dim ** -0.5
-
-        self.projq = nn.Linear(dim, dim, bias=qkv_bias)
-        self.projk = nn.Linear(dim, dim, bias=qkv_bias)
-        self.projv = nn.Linear(dim, dim, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop)
-
-        self.rope = rope
-
-    def forward(self, query, key, value, qpos, kpos):
-        B, Nq, C = query.shape
-        Nk = key.shape[1]
-        Nv = value.shape[1]
-
-        q = self.projq(query).reshape(B, Nq, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-        k = self.projk(key).reshape(B, Nk, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-        v = self.projv(value).reshape(B, Nv, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-
-        if self.rope is not None:
-            q = self.rope(q, qpos)
-            k = self.rope(k, kpos)
-
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-
-        x = (attn @ v).transpose(1, 2).reshape(B, Nq, C)
-        x = self.proj(x)
-        x = self.proj_drop(x)
-        return x
-
-
 class DecoderBlock(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
@@ -261,8 +217,6 @@ class DecoderBlock(nn.Module):
         self.norm1 = norm_layer(dim)
         self.attn = Attention(dim, rope=rope, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop,
                               proj_drop=drop)
-        self.cross_attn = CrossAttention(dim, rope=rope, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop,
-                                         proj_drop=drop)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         self.norm3 = norm_layer(dim)
@@ -315,11 +269,8 @@ class PatchEmbed(nn.Module):
 # Main
 # --------------------------------------------------------
 class MMM(nn.Module):
-
     def __init__(self,
-                 img_size=224,  # input image size
-                 patch_size=16,  # patch_size
-                 mask_ratio=0.9,  # ratios of masked tokens
+                 mask_ratio=0.7,  # ratios of masked tokens
                  enc_embed_dim=512,  # encoder feature dimension
                  enc_depth=12,  # encoder depth
                  enc_num_heads=8,  # encoder number of heads in the transformer block
@@ -331,7 +282,7 @@ class MMM(nn.Module):
                  norm_im2_in_dec=True,
                  # whether to apply normalization of the 'memory' = (second image) in the decoder
                  pos_embed='RoPE100',  # positional embedding (either cosine or RoPE100)
-                 set_pred_head=True
+                 set_pred_head=True,
                  ):
 
         super(MMM, self).__init__()
@@ -341,6 +292,7 @@ class MMM(nn.Module):
 
         self.pos_embed = pos_embed
         self.set_pred_head = set_pred_head
+        self.mask_ratio = mask_ratio
 
         freq = float(pos_embed[len('RoPE'):])
         """
@@ -429,7 +381,7 @@ class MMM(nn.Module):
         x, pos = patch_embed(motion)
         B, N, C = x.size()
         # mask generator
-        mask_generator = RandomMask(N)
+        mask_generator = RandomMask(N, mask_ratio=self.mask_ratio)
 
         # apply masking
 
