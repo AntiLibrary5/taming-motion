@@ -7,10 +7,20 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from vqvae_motion import (get_args_parser, get_logger, WordVectorizer, get_opt, EvaluatorModelWrapper,
-                          eval_dataloader, HumanVQVAE, motion_dataloader, cycle)
+                          eval_dataloader, HumanVQVAE, motion_dataloader, cycle, recover_from_ric,
+                          draw_to_batch)
 
 from mmm import MMM
 
+def vis_motion(motion, val_loader, args, title="Motion Seq", filename='gm3'):
+    bs, seq = motion.shape[0], motion.shape[1]
+    num_joints = 21 if motion.shape[-1] == 251 else 22
+    pred_pose = val_loader.dataset.inv_transform(motion.detach().cpu().numpy())
+    pred_pose_xyz = recover_from_ric(torch.from_numpy(pred_pose).float().cuda(), num_joints)
+    xyz = pred_pose_xyz[:1]
+    xyz = xyz.reshape(bs, seq, -1, 3)
+    plot_xyz = draw_to_batch(xyz.cpu().numpy(), title,
+                             [os.path.join('output', args.exp_name, f'{filename}.gif')])
 args = get_args_parser()
 torch.manual_seed(args.seed)
 
@@ -32,7 +42,7 @@ eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
 ##### ---- Dataloader ---- #####
 args.nb_joints = 22
 
-val_loader = eval_dataloader(args.dataname, True, 32, w_vectorizer, unit_length=2 ** args.down_t)
+val_loader = eval_dataloader(args.dataname, False, 32, w_vectorizer, unit_length=2 ** args.down_t)
 
 ##### ---- Network ---- #####
 vqvae = HumanVQVAE(args,  ## use args to define different parameters in different quantizers
@@ -49,13 +59,57 @@ vqvae = HumanVQVAE(args,  ## use args to define different parameters in differen
 
 if args.resume_pth:
     logger.info('loading checkpoint from {}'.format(args.resume_pth))
-    ckpt = torch.load(args.resume_pth, map_location='cpu')
-    vqvae.load_state_dict(ckpt['net'], strict=True)
+    ckpt_vqvae = torch.load(args.resume_pth, map_location='cpu')
+    vqvae.load_state_dict(ckpt_vqvae['net'], strict=True)
 
 vqvae.eval()
 vqvae.cuda()
 
 m3 = MMM(mask_ratio=args.mask_ratio)
+
+if args.eval:
+    logger.info('loading checkpoint from {}'.format(args.exp_name))
+    ckpt_gm3 = torch.load(os.path.join('output', args.exp_name, 'net_last.pth'), map_location='cpu')
+    m3.load_state_dict(ckpt_gm3['net'], strict=True)
+    m3.eval()
+    m3.cuda()
+
+    args.nb_joints = 22
+    val_loader = eval_dataloader(args.dataname, True, 1, w_vectorizer, unit_length=2 ** args.down_t)
+    c = 0
+    draw_org = []
+    draw_pred = []
+    for i, batch in enumerate(val_loader):
+        if not i>1:
+            continue
+        if i > 3:
+            exit()
+        word_embeddings, pos_one_hots, caption, sent_len, motion, m_length, token, name = batch
+        motion = motion.cuda()
+        # vqvae encoder
+        code_idx = vqvae.encode(motion)
+        quants = vqvae.vqvae.quantizer.dequantize(code_idx)
+        # masked encoder decoder
+        logits, mask, target = m3(quants)
+        # vqvae decoder
+        x_d = logits.view(1, -1, vqvae.vqvae.code_dim).permute(0, 2, 1).contiguous()
+        x_decoder = vqvae.vqvae.decoder(x_d)
+        motion_pred = vqvae.vqvae.postprocess(x_decoder)
+        print(f"Seq {i}")
+        print(F.mse_loss(
+            motion,
+            motion_pred,
+            reduction="mean",
+        ))
+        print(mask)
+        print()
+        # vis
+        #vis_motion(motion, val_loader, args, title="GT Seq", filename=f'99gm3_gt{i}')
+        vis_motion(motion_pred, val_loader, args, title="Pred Seq", filename=f'99gm3_pred{i}')
+
+
+
+
 m3.train()
 m3.cuda()
 
