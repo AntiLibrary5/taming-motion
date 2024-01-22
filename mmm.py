@@ -406,6 +406,7 @@ class MMM(nn.Module):
             for blk in self.enc_blocks:
                 x = blk(x, posvis)
             x = self.enc_norm(x)
+            # TODO: sanity check. count number of tokens before and after masking. Should be 0.6 less
             return x, pos, masks
 
     def _decoder(self, feat, pos, masks, return_all_blocks=False):
@@ -486,6 +487,8 @@ class MMM(nn.Module):
         # prediction head
         if self.set_pred_head:
             out = self.prediction_head(decfeat)
+        else:
+            out = decfeat
         # get target
         target = motion
         return out, mask, target
