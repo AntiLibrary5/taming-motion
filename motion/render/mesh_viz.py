@@ -10,7 +10,7 @@ from motion.utils.mesh_utils import MeshViewer
 from motion.utils.smpl_body_utils import colors,marker2bodypart,bodypart2color
 from motion.utils.smpl_body_utils import c2rgba, get_body_model
 #from hydra.utils import get_original_cwd
-from motion.render.video import save_video_samples
+from motion.render.video import save_video_samples, put_text
 
 import os 
 from PIL import Image
@@ -62,10 +62,11 @@ def visualize_meshes(vertices, pcd=None, multi_col=None, text=None,
             pcd = pcd.unsqueeze(0)
     mesh_rec = vertices
     if use_hydra_path:
-        with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):
-            smpl = get_body_model(path=f'{get_original_cwd()}/data/smpl_models',
-                                model_type='smpl', gender='neutral',
-                                batch_size=1, device='cpu')
+        print("Wow Nelly!")
+        #with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):
+        #    smpl = get_body_model(path=f'{get_original_cwd()}/data/smpl_models',
+        #                        model_type='smpl', gender='neutral',
+        #                        batch_size=1, device='cpu')
     else:
         with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):
             smpl = get_body_model(
@@ -148,11 +149,14 @@ def visualize_meshes(vertices, pcd=None, multi_col=None, text=None,
         return np.transpose(video, (0, 1, 4, 2, 3)).astype(np.uint8)
 
     if save_path is not None:
-        from motion.render.video import Video
-        vid = Video(list(np.squeeze(video).astype(np.uint8)))
+        #from motion.render.video import Video
+        #vid = Video(list(np.squeeze(video).astype(np.uint8)))
+        import imageio
+        imageio.mimsave(save_path, np.squeeze(video).astype(np.uint8), fps=15)
         if text is not None:
-            vid.add_text(text)
-        return vid.save(save_path)
+            put_text(text, save_path, v=True)
+            #vid.add_text(text)
+        return 0#vid.save(save_path)
         # return save_video_samples(np.transpose(np.squeeze(video),
         #                                        (0, 3, 1, 2)).astype(np.uint8),
         #                           save_path, text)

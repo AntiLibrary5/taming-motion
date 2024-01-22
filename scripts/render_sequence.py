@@ -25,7 +25,8 @@ import motion.utils.smpl_body_utils as smpl_body_utils
 import motion.render.mesh_viz as mesh_viz
 from motion.utils.smpl_from_joints import joints2smpl
 from motion.utils.rotation2xyz import Rotation2xyz
-device='cpu'
+
+device='cuda:0'
 
 def main(dataset_path, sequence_id, output_folder, description, threads, debug, device='cpu'):
     # Read motion and associated caption
@@ -34,8 +35,8 @@ def main(dataset_path, sequence_id, output_folder, description, threads, debug, 
     joints_vec_path = os.path.join(dataset_path, "new_joints", sequence_id.zfill(6)+ ".npy") #Nx22
     caption_path = os.path.join(dataset_path, "texts", sequence_id.zfill(6)+ ".txt")
     # Read
-    motion_vec = torch.tensor(np.load(motion_vec_path), device=device)
-    joints_vec = torch.tensor(np.load(joints_vec_path), device=device)
+    motion_vec = torch.tensor(np.load(motion_vec_path), device=device)[:3,:]
+    joints_vec = torch.tensor(np.load(joints_vec_path), device=device)[:3,:]
     caption = open(caption_path).readlines()
     
     # Rendering
@@ -54,13 +55,13 @@ def main(dataset_path, sequence_id, output_folder, description, threads, debug, 
     print(f'Running SMPLify, it may take a few minutes.')
     motion_tensor, opt_dict = j2s.joint2smpl(joints_vec)  # [nframes, njoints, 3]
 
-    vertices = rot2xyz(torch.tensor(motion_tensor).clone(), mask=None,
+    vertices = rot2xyz(torch.tensor(motion_tensor, device=device).clone(), mask=None,
                                     pose_rep='rot6d', translation=True, glob=True,
                                     jointstype='vertices',
-                                    vertstrans=True)
+                                    vertstrans=True,)
     # Generate animation
     mesh_viz.visualize_meshes(
-        vertices.detach().cpu().numpy(), save_path=os.path.join(output_folder, f"test.mp4"), fig_label=caption)
+        vertices.squeeze(0).permute(-1,0,1).detach().cpu().numpy(), save_path=os.path.join(output_folder, f"test.gif"), fig_label=caption)
     return
 
 
@@ -87,5 +88,5 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true", required=False)
     args = parser.parse_args()
     
-    main(**vars(args))  
+    main(**vars(args), device=device)  
     

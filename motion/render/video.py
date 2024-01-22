@@ -9,7 +9,7 @@ import numpy as np
 from typing import List
 from moviepy.editor import VideoFileClip, clips_array, vfx
 
-
+#https://stackoverflow.com/questions/75245748/cant-save-a-file-in-moviepy-python
 mpy_conf = {"codec": "libx264",
             "audio_codec": "aac",
             "temp_audiofile": "temp-audio.m4a",
@@ -83,12 +83,10 @@ class Video:
                       "fps": self.fps,
                       "audio_codec": "aac",
                       "temp_audiofile": "temp-audio.m4a",
-                      "remove_temp": True, "verbose":False,
-                      "logger":None}
+                      "remove_temp": True, "verbose":False,}
 
         self._conf = {"bitrate": "5000k",
-                      "fps": self.fps,"verbose":False,
-                      "logger":None}
+                      "fps": self.fps,"verbose":False,}
 
         # Load video
         # video = mp.VideoFileClip(video1_path, audio=False)
