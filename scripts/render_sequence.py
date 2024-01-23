@@ -25,43 +25,23 @@ import motion.utils.smpl_body_utils as smpl_body_utils
 import motion.render.mesh_viz as mesh_viz
 from motion.utils.smpl_from_joints import joints2smpl
 from motion.utils.rotation2xyz import Rotation2xyz
+from motion.render.mesh_viz import render_motion_sequence
 
-device='cuda:0'
+device='cpu'
 
-def main(dataset_path, sequence_id, output_folder, description, threads, debug, device='cpu'):
+def main(dataset_path, sequence_id, output_folder, description, threads, debug, device='cpu',):
     # Read motion and associated caption
     assert os.path.exists(dataset_path)
-    motion_vec_path = os.path.join(dataset_path, "new_joint_vecs", sequence_id.zfill(6)+ ".npy") #Nx263
-    joints_vec_path = os.path.join(dataset_path, "new_joints", sequence_id.zfill(6)+ ".npy") #Nx22
+    motion_vec_path = os.path.join(dataset_path, "new_joint_vecs", f"{sequence_id.zfill(6)}.npy") #Nx263
+    joints_vec_path = os.path.join(dataset_path, "new_joints", f"{sequence_id.zfill(6)}.npy") #Nx22
     caption_path = os.path.join(dataset_path, "texts", sequence_id.zfill(6)+ ".txt")
     # Read
-    motion_vec = torch.tensor(np.load(motion_vec_path), device=device)[:3,:]
-    joints_vec = torch.tensor(np.load(joints_vec_path), device=device)[:3,:]
+    motion_vec = torch.tensor(np.load(motion_vec_path), device=device)
+    joints_vec = np.load(joints_vec_path)
     caption = open(caption_path).readlines()
     
-    # Rendering
-    frames = joints_vec.shape[0]
-    MINS = joints_vec.min(axis=0)[0].min(axis=0)[0]
-    MAXS = joints_vec.max(axis=0)[0].max(axis=0)[0]
-
-    #height_offset = MINS[1]
-    #joints_vec[:, :, 1] -= height_offset
-    trajec = joints_vec[:, 0, [0, 2]]
-
-    j2s = joints2smpl(num_frames=frames,)
-    rot2xyz = Rotation2xyz(device=torch.device(device))
-    faces = rot2xyz.smpl_model.faces
-
-    print(f'Running SMPLify, it may take a few minutes.')
-    motion_tensor, opt_dict = j2s.joint2smpl(joints_vec)  # [nframes, njoints, 3]
-
-    vertices = rot2xyz(torch.tensor(motion_tensor, device=device).clone(), mask=None,
-                                    pose_rep='rot6d', translation=True, glob=True,
-                                    jointstype='vertices',
-                                    vertstrans=True,)
-    # Generate animation
-    mesh_viz.visualize_meshes(
-        vertices.squeeze(0).permute(-1,0,1).detach().cpu().numpy(), save_path=os.path.join(output_folder, f"test.gif"), fig_label=caption)
+    render_motion_sequence(motion_vec, joints_vec, caption, sequence_id, output_folder, description, threads, True, device)
+    
     return
 
 

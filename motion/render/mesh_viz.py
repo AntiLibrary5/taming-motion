@@ -11,11 +11,50 @@ from motion.utils.smpl_body_utils import colors,marker2bodypart,bodypart2color
 from motion.utils.smpl_body_utils import c2rgba, get_body_model
 #from hydra.utils import get_original_cwd
 from motion.render.video import save_video_samples, put_text
+import motion.render.mesh_viz as mesh_viz
+from motion.utils.smpl_from_joints import joints2smpl
+from motion.utils.rotation2xyz import Rotation2xyz
 
 import os 
 from PIL import Image
 import subprocess
 import contextlib
+
+
+def render_motion_sequence(motion_vec, joints_vec, caption, sequence_id, output_folder, description=None, threads: int=1, debug: bool=False, device='cpu'):
+    # Rendering
+    frames = joints_vec.shape[0]
+    MINS = joints_vec.min(axis=0).min(axis=0)
+    MAXS = joints_vec.max(axis=0).max(axis=0)
+
+    height_offset = MINS[1]
+    joints_vec[:, :, 1] -= height_offset
+    trajec = joints_vec[:, 0, [0, 2]]
+
+    j2s = joints2smpl(num_frames=frames,cuda=True)
+    rot2xyz = Rotation2xyz(device=torch.device(device))
+    faces = rot2xyz.smpl_model.faces
+    # If debug cache the vertices
+    if (not os.path.exists(os.path.join(output_folder, f'{sequence_id}_pred.pt')) or not debug):
+        print(f'Running SMPLify, it may take a few minutes.')
+        joints_vec = torch.tensor(joints_vec, device=device)
+        # Permute axis
+        joints_vec = torch.cat((joints_vec[:,:,0].unsqueeze(-1), joints_vec[:,:,2].unsqueeze(-1), joints_vec[:,:,1].unsqueeze(-1)), dim=-1)
+        motion_tensor, opt_dict = j2s.joint2smpl(joints_vec)  # [nframes, njoints, 3]
+
+        vertices = rot2xyz(torch.tensor(motion_tensor, device=device).clone(), mask=None,
+                                        pose_rep='rot6d', translation=True, glob=True,
+                                        jointstype='vertices',
+                                        vertstrans=True,)
+        # Cache values
+        torch.save(vertices, os.path.join(output_folder, f'{sequence_id}_pred.pt'))
+    else:
+        # Path exists and debug
+        print("Using cached values...")
+        vertices = torch.load(os.path.join(output_folder, f'{sequence_id}_pred.pt'))
+    # Generate animation
+    mesh_viz.visualize_meshes(
+        vertices.squeeze(0).permute(-1,0,1).detach().cpu().numpy(), save_path=os.path.join(output_folder, f"{sequence_id}.gif"), text=caption[0].split("#")[0])
 
 def visualize_meshes(vertices, pcd=None, multi_col=None, text=None,
                      multi_angle=False, h=720, w=720, bg_color='white',
@@ -91,7 +130,7 @@ def visualize_meshes(vertices, pcd=None, multi_col=None, text=None,
     video = np.zeros([seqlen, im_height, im_width, 3])
     for i in range(seqlen):
         Rx = trimesh.transformations.rotation_matrix(math.radians(-90), [1, 0, 0])
-        Ry = trimesh.transformations.rotation_matrix(math.radians(90), [0, 1, 0])
+        Ry = trimesh.transformations.rotation_matrix(math.radians(0), [0, 1, 0])
 
         if vis_mar:
             m_pcd = trimesh.points.PointCloud(pcd[i])
@@ -154,7 +193,7 @@ def visualize_meshes(vertices, pcd=None, multi_col=None, text=None,
         import imageio
         imageio.mimsave(save_path, np.squeeze(video).astype(np.uint8), fps=15)
         if text is not None:
-            put_text(text, save_path, v=True)
+            put_text(text, save_path, save_path, v=True)
             #vid.add_text(text)
         return 0#vid.save(save_path)
         # return save_video_samples(np.transpose(np.squeeze(video),
