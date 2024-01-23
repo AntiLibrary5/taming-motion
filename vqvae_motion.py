@@ -37,6 +37,7 @@ import imageio
 
 import param_util
 
+from mmm import RandomMask
 
 ########
 # ARGS #
@@ -101,6 +102,7 @@ def get_args_parser():
     parser.add_argument('--nb-vis', default=20, type=int, help='nb of visualizations')
 
     parser.add_argument('--eval', action='store_true', help='eval only and no training')
+    parser.add_argument('--with_mask_token', action='store_true', help='eval only and no training')
     parser.add_argument("--mask_ratio", type=float, default=0.7, help="exponential moving average to update the codebook")
 
     return parser.parse_args()
@@ -876,7 +878,8 @@ class VQVAE_251(nn.Module):
                  depth=3,
                  dilation_growth_rate=3,
                  activation='relu',
-                 norm=None):
+                 norm=None,
+                 mask_token=False):
 
         super().__init__()
         self.code_dim = code_dim
@@ -887,6 +890,9 @@ class VQVAE_251(nn.Module):
         self.decoder = Decoder(251 if args.dataname == 'kit' else 263, output_emb_width, down_t, stride_t, width, depth,
                                dilation_growth_rate, activation=activation, norm=norm)
         self.quantizer = QuantizeEMAReset(nb_code, code_dim, args)
+        self.use_mask_token = mask_token
+        if mask_token:
+            self.mask_token = nn.Parameter(torch.zeros(1, 1, 263))
 
     def preprocess(self, x):
         # (bs, T, Jx3) -> (bs, Jx3, T)
@@ -899,8 +905,22 @@ class VQVAE_251(nn.Module):
         return x
 
     def encode(self, x):
-        N, T, _ = x.shape
+        N, T, h = x.shape # batch, n_token, hidden_dim
         x_in = self.preprocess(x)
+
+        # mask
+        if self.use_mask_token:
+            mask_generator = RandomMask(T, mask_ratio=0.6)
+            masks = mask_generator(x)  # first dim should be Batch. return_size:256x64
+            Ntotal_masks = masks.size(1) # return_size:64
+            mask_tokens = self.mask_token.repeat(N, Ntotal_masks, 1).to(dtype=x_in.dtype) # return_size:256x64x263
+            x_in = x_in.permute(0,2,1) # return_size:256x64x263
+            mask_tokens = mask_tokens.view(-1, 263)
+            masks = masks.view(-1)
+            mask_tokens[~masks] = x_in.view(N * T, h)[~masks]
+            x_in = mask_tokens.view(N, -1, h)
+            x_in = x_in.permute(0, 2, 1)
+
         x_encoder = self.encoder(x_in)
         x_encoder = self.postprocess(x_encoder)
         x_encoder = x_encoder.contiguous().view(-1, x_encoder.shape[-1])  # (NT, C)
@@ -909,8 +929,23 @@ class VQVAE_251(nn.Module):
         return code_idx
 
     def forward(self, x):
+        N, T, h = x.shape # batch, n_token, hidden_dim
 
         x_in = self.preprocess(x)
+
+        # mask
+        if self.use_mask_token:
+            mask_generator = RandomMask(T, mask_ratio=0.6)
+            masks = mask_generator(x)  # first dim should be Batch. return_size:256x64
+            Ntotal_masks = masks.size(1) # return_size:64
+            mask_tokens = self.mask_token.repeat(N, Ntotal_masks, 1).to(dtype=x_in.dtype) # return_size:256x64x263
+            x_in = x_in.permute(0,2,1) # return_size:256x64x263
+            mask_tokens = mask_tokens.view(-1, 263)
+            masks = masks.view(-1)
+            mask_tokens[~masks] = x_in.view(N * T, h)[~masks]
+            x_in = mask_tokens.view(N, -1, h)
+            x_in = x_in.permute(0, 2, 1)
+
         # Encode
         x_encoder = self.encoder(x_in)
 
@@ -944,12 +979,13 @@ class HumanVQVAE(nn.Module):
                  depth=3,
                  dilation_growth_rate=3,
                  activation='relu',
-                 norm=None):
+                 norm=None,
+                 mask_token=False):
         super().__init__()
 
         self.nb_joints = 21 if args.dataname == 'kit' else 22
         self.vqvae = VQVAE_251(args, nb_code, code_dim, output_emb_width, down_t, stride_t, width, depth,
-                               dilation_growth_rate, activation=activation, norm=norm)
+                               dilation_growth_rate, activation=activation, norm=norm, mask_token=mask_token)
 
     def encode(self, x):
         b, t, c = x.size()
@@ -1749,7 +1785,7 @@ if '__main__' == __name__:
         avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
         best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = evaluation_vqvae(
             args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, best_top1=0,
-            best_top2=0, best_top3=0, best_matching=100, eval_wrapper=eval_wrapper)
+            best_top2=0, best_top3=0, best_matching=100, eval_wrapper=eval_wrapper, draw=False, save=True, savegif=False)
 
         for nb_iter in range(1, args.total_iter + 1):
             gt_motion = next(train_loader_iter)

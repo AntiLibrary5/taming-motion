@@ -2,6 +2,7 @@ import os
 import json
 
 import torch
+import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 import torch.optim as optim
@@ -11,6 +12,22 @@ from vqvae_motion import (get_args_parser, get_logger, WordVectorizer, get_opt, 
                           draw_to_batch)
 
 from mmm import MMM
+
+class KeyFrameMask(nn.Module):
+    """
+    random masking
+    """
+    def __init__(self, num_patches):
+        super().__init__()
+        self.num_patches = num_patches
+        self.num_mask = int(self.num_patches/2)
+
+    def __call__(self, x):
+        keyframes = torch.arange(0, self.num_patches, step=5, device=x.device)
+        all_frames = torch.arange(0, self.num_patches, device=x.device)
+        masked_frames = torch.as_tensor([token not in keyframes for token in all_frames], device=x.device).unsqueeze(0)
+        return masked_frames
+
 
 def vis_motion(motion, val_loader, args, title="Motion Seq", filename='gm3'):
     bs, seq = motion.shape[0], motion.shape[1]
@@ -55,7 +72,8 @@ vqvae = HumanVQVAE(args,  ## use args to define different parameters in differen
                  args.depth,
                  args.dilation_growth_rate,
                  args.vq_act,
-                 args.vq_norm)
+                 args.vq_norm,
+                 mask_token=True)
 
 if args.resume_pth:
     logger.info('loading checkpoint from {}'.format(args.resume_pth))
@@ -66,6 +84,63 @@ vqvae.eval()
 vqvae.cuda()
 
 m3 = MMM(mask_ratio=args.mask_ratio)
+
+if args.with_mask_token:
+    mask_token = vqvae.vqvae.mask_token
+    args.nb_joints = 22
+
+    val_loader = eval_dataloader(args.dataname, True, 1, w_vectorizer, unit_length=2 ** args.down_t)
+
+    c = 0
+    draw_org = []
+    draw_pred = []
+    for i, batch in enumerate(val_loader):
+        if i>2:
+            exit()
+        word_embeddings, pos_one_hots, caption, sent_len, motion, m_length, token, name = batch
+        motion = motion.cuda()
+
+        # mask input
+        N, T, h = motion.shape # batch, n_token, hidden_dim
+        x_in = vqvae.vqvae.preprocess(motion)
+
+        # mask
+        mask_generator = KeyFrameMask(T)
+        masks = mask_generator(x_in)  # first dim should be Batch. return_size:256x64
+        Ntotal_masks = masks.size(1) # return_size:64
+        mask_tokens = mask_token.repeat(N, Ntotal_masks, 1).to(dtype=x_in.dtype) # return_size:256x64x263
+        x_in = x_in.permute(0,2,1) # return_size:256x64x263
+        mask_tokens = mask_tokens.view(-1, 263)
+        masks = masks.view(-1)
+        mask_tokens[~masks] = x_in.view(N * T, h)[~masks]
+        x_in = mask_tokens.view(N, -1, h)
+        #x_in = x_in.permute(0, 2, 1)
+
+        # vqvae encoder
+        code_idx = vqvae.encode(x_in)
+        quants = vqvae.vqvae.quantizer.dequantize(code_idx)
+
+        # masked encoder decoder
+        #logits, mask, target = m3(quants)
+        # vqvae decoder
+        #x_d = logits.view(1, -1, vqvae.vqvae.code_dim).permute(0, 2, 1).contiguous()
+
+        x_d = quants.view(1, -1, vqvae.vqvae.code_dim).permute(0, 2, 1).contiguous()
+        x_decoder = vqvae.vqvae.decoder(x_d)
+        motion_pred = vqvae.vqvae.postprocess(x_decoder)
+        print(f"Seq {i}")
+        print(F.mse_loss(
+            motion,
+            motion_pred,
+            reduction="mean",
+        ))
+        #print(mask)
+        #print()
+        # vis
+        vis_motion(x_in, val_loader, args, title="GT Seq", filename=f'vqvae_keyframe_gt{i}')
+        vis_motion(motion_pred, val_loader, args, title="Pred Seq", filename=f'vqvae_keyframe_pred{i}')
+    exit()
+
 
 if args.eval:
     logger.info('loading checkpoint from {}'.format(args.exp_name))
