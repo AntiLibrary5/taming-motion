@@ -92,6 +92,13 @@ python vqvae_motion.py --batch-size 256 --lr 2e-4 --total-iter 300000 --lr-sched
 python gm3.py --mask_ratio 0.6 --batch-size 256 --lr 2e-4 --total-iter 250000 --lr-scheduler 200000 --nb-code 512 --down-t 2 --depth 3 --dilation-growth-rate 3 --out-dir output --dataname t2m --vq-act relu --quantizer ema_reset --loss-vel 0.5 --recons-loss l1_smooth --exp-name gm3-train --resume-pth output/motion-vqvae/net_last.pth
 ```
 
+## Eval VQVAE with mask tokens
+Download model from: https://mybox.inria.fr/f/9ce3b9c67ec344a2a97f/?dl=1
+Place it as: `output/motion-vqvae-with-mask-token/net_last.pth`
+```angular2html
+python gm3.py --batch-size 256 --lr 2e-4 --total-iter 300000 --lr-scheduler 200000 --nb-code 512 --down-t 2 --depth 3 --dilation-growth-rate 3 --out-dir output --dataname t2m --vq-act relu --quantizer ema_reset --loss-vel 0.5 --recons-loss l1_smooth --exp-name motion-vqvae-with-mask-test-gifs --resume-pth output/motion-vqvae-with-mask-token/net_last.pth --with_mask_token
+```
+
 ## Visualize Results
 ```angular2html
 tensorboard --logdir=<EXP-NAME>

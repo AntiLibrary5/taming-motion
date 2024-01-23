@@ -73,7 +73,7 @@ vqvae = HumanVQVAE(args,  ## use args to define different parameters in differen
                  args.dilation_growth_rate,
                  args.vq_act,
                  args.vq_norm,
-                 mask_token=True)
+                 mask_token=args.with_mask_token)
 
 if args.resume_pth:
     logger.info('loading checkpoint from {}'.format(args.resume_pth))
