@@ -40,7 +40,7 @@ def main(dataset_path, sequence_id, output_folder, description, threads, debug, 
     joints_vec = np.load(joints_vec_path)
     caption = open(caption_path).readlines()
     
-    render_motion_sequence(motion_vec, joints_vec, caption, sequence_id, output_folder, description, threads, True, device)
+    render_motion_sequence(motion_vec, joints_vec, caption, sequence_id, output_folder, description, threads, debug, device)
     
     return
 
