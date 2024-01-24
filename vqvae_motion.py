@@ -38,6 +38,12 @@ import imageio
 import param_util
 
 from mmm import RandomMask
+import socket
+
+if socket.gethostname() == 'carvanha':
+    dataset_root = '/media/varora/LaCie/Datasets/HumanML3D/HumanML3D/'
+else:
+    dataset_root = '/home/varora/LaCie/Datasets/HumanML3D/HumanML3D/'
 
 ########
 # ARGS #
@@ -102,7 +108,8 @@ def get_args_parser():
     parser.add_argument('--nb-vis', default=20, type=int, help='nb of visualizations')
 
     parser.add_argument('--eval', action='store_true', help='eval only and no training')
-    parser.add_argument('--with_mask_token', action='store_true', help='eval only and no training')
+    parser.add_argument('--with_mask_token_eval', action='store_true', help='eval only and no training')
+    parser.add_argument('--with_mask_token', action='store_true', help='training')
     parser.add_argument("--mask_ratio", type=float, default=0.7, help="exponential moving average to update the codebook")
 
     return parser.parse_args()
@@ -318,7 +325,7 @@ class VQMotionDataset(data.Dataset):
         self.window_size = window_size
         self.unit_length = unit_length
 
-        self.data_root = '/media/varora/LaCie/Datasets/HumanML3D/HumanML3D/'
+        self.data_root = dataset_root
         self.motion_dir = pjoin(self.data_root, 'new_joint_vecs')
         self.text_dir = pjoin(self.data_root, 'texts')
         self.joints_num = 22
@@ -424,7 +431,7 @@ class Text2MotionDataset(data.Dataset):
         self.unit_length = unit_length
         self.w_vectorizer = w_vectorizer
 
-        self.data_root = '/media/varora/LaCie/Datasets/HumanML3D/HumanML3D/'
+        self.data_root = dataset_root
         self.motion_dir = pjoin(self.data_root, 'new_joint_vecs')
         self.text_dir = pjoin(self.data_root, 'texts')
         self.joints_num = 22

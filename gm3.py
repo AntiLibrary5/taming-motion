@@ -61,6 +61,7 @@ args.nb_joints = 22
 
 val_loader = eval_dataloader(args.dataname, False, 32, w_vectorizer, unit_length=2 ** args.down_t)
 
+use_mask_token = args.with_mask_token or args.with_mask_token_eval
 ##### ---- Network ---- #####
 vqvae = HumanVQVAE(args,  ## use args to define different parameters in different quantizers
                  args.nb_code,
@@ -73,7 +74,7 @@ vqvae = HumanVQVAE(args,  ## use args to define different parameters in differen
                  args.dilation_growth_rate,
                  args.vq_act,
                  args.vq_norm,
-                 mask_token=args.with_mask_token)
+                 mask_token=use_mask_token)
 
 if args.resume_pth:
     logger.info('loading checkpoint from {}'.format(args.resume_pth))
@@ -85,7 +86,7 @@ vqvae.cuda()
 
 m3 = MMM(mask_ratio=args.mask_ratio)
 
-if args.with_mask_token:
+if args.with_mask_token_eval:
     mask_token = vqvae.vqvae.mask_token
     args.nb_joints = 22
 
@@ -114,7 +115,7 @@ if args.with_mask_token:
         masks = masks.view(-1)
         mask_tokens[~masks] = x_in.view(N * T, h)[~masks]
         x_in = mask_tokens.view(N, -1, h)
-        #x_in = x_in.permute(0, 2, 1)
+        x_in = vqvae.vqvae.preprocess(x_in) #x_in.permute(0, 2, 1)
 
         # vqvae encoder
         code_idx = vqvae.encode(x_in)
