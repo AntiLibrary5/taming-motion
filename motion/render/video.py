@@ -9,7 +9,7 @@ import numpy as np
 from typing import List
 from moviepy.editor import VideoFileClip, clips_array, vfx
 
-
+#https://stackoverflow.com/questions/75245748/cant-save-a-file-in-moviepy-python
 mpy_conf = {"codec": "libx264",
             "audio_codec": "aac",
             "temp_audiofile": "temp-audio.m4a",
@@ -83,12 +83,10 @@ class Video:
                       "fps": self.fps,
                       "audio_codec": "aac",
                       "temp_audiofile": "temp-audio.m4a",
-                      "remove_temp": True, "verbose":False,
-                      "logger":None}
+                      "remove_temp": True, "verbose":False,}
 
         self._conf = {"bitrate": "5000k",
-                      "fps": self.fps,"verbose":False,
-                      "logger":None}
+                      "fps": self.fps,"verbose":False,}
 
         # Load video
         # video = mp.VideoFileClip(video1_path, audio=False)
@@ -148,15 +146,18 @@ def stack_vids(vids_to_stack: List[str], fname: str, orient='v', v=False):
 def put_text(text: str, fname: str, outf: str, v=False):
     cmd_m = ['ffmpeg']
     # -i inputClip.mp4 -vf f"drawtext=text='{method}':x=200:y=0:fontsize=22:fontcolor=white" -c:a copy {temp_path}.mp4
-
-    cmd_m.extend(['-i',fname, '-y', '-vf', f"drawtext=text='{text}':x=(w-text_w)/2:y=h-th-10:fontsize=20::box=1:boxcolor=black@0.6:boxborderw=5:fontcolor=white",
-                    '-loglevel', 'quiet', '-c:a', 'copy',
-                    f'{outf}'])
+    file_tmp_path = "/tmp/tmp.gif"
+    cmd_m.extend(['-i',fname, '-y', "-vf", f"drawtext=text='{text}':fontcolor=red:fontsize=24,split[s0][s1];[s0]palettegen=reserve_transparent=1[p];[s1][p]paletteuse",
+                    f'{file_tmp_path}'])
 
     if v:
         print('Executing', ' '.join(cmd_m))
-    x = subprocess.call(cmd_m)
-
+    x = subprocess.run(cmd_m)
+    # Delete tmp and copy
+    import shutil
+    os.remove(outf)
+    shutil.copyfile(file_tmp_path, outf)
+    os.remove(file_tmp_path)
     return outf
 
 

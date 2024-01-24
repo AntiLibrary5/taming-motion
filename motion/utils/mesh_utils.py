@@ -20,10 +20,11 @@ import sys
 from motion.utils.smpl_body_utils import colors
 
 
-# Heavily inspired (practically lifted with a few minor modifications from https://github.com/athn-nik/sinc/blob/main/sinc/utils/mesh_utils.py)
+# Heavily inspired (practically lifted with a few minor modifications) from https://github.com/athn-nik/sinc/blob/main/sinc/utils/mesh_utils.py)
 
 def get_checkerboard_plane(plane_mins, center=True):
     minx, maxx, miny, maxy = plane_mins
+    minx, maxx, miny, maxy = minx.min(), maxx.max(), miny.min(), maxy.max()
     minz = 0
     gray = [189, 195, 199, 255]
     gray_l = [238, 238, 238, 150]
@@ -35,7 +36,7 @@ def get_checkerboard_plane(plane_mins, center=True):
         [maxx, miny, minz]
     ]
     meshes = []
-    radius = max((maxx - minx), (maxy - miny))
+    radius = max((maxx - minx).max(), (maxy - miny).max())
 
     ground2 = trimesh.primitives.Box(
         extents=[ maxx-minx + radius, maxy-miny + radius, 0.000002]

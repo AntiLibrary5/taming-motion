@@ -15,7 +15,7 @@ import argparse
 
 class joints2smpl:
 
-    def __init__(self, num_frames, device_id: int=0, cuda=False):
+    def __init__(self, num_frames, device_id: int=0, cuda=True):
         self.device = torch.device("cuda:" + str(device_id) if cuda else "cpu")
         # self.device = torch.device("cpu")
         self.batch_size = num_frames
@@ -24,7 +24,7 @@ class joints2smpl:
         self.num_smplify_iters = 150
         self.fix_foot = False
         print(config.SMPL_MODEL_DIR)
-        smplmodel = smpl_body_utils.get_body_model(model_type="smpl", gender="male", batch_size=self.batch_size)
+        smplmodel = smpl_body_utils.get_body_model(model_type="smpl", gender="male", batch_size=self.batch_size, device=self.device)
         # ## --- load the mean pose as original ----
         smpl_mean_file = config.SMPL_MEAN_FILE
 

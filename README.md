@@ -25,6 +25,7 @@ You will need to either download and process your own copy of HumanML3D or mount
 ```angular2html
 '/media/varora/LaCie/Datasets/HumanML3D/HumanML3D/'
 ```
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 --upgrade --force-reinstall
 
 ## TO-DO
 - [x] Download HumanML3D dataset
