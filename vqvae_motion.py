@@ -40,7 +40,7 @@ import param_util
 from mmm import RandomMask
 import socket
 
-if socket.gethostname() == 'carvanha.inrialpes.fr':
+if socket.gethostname() == 'carvanha':
     dataset_root = '/media/varora/LaCie/Datasets/HumanML3D/HumanML3D/'
 else:
     dataset_root = '/home/varora/LaCie/Datasets/HumanML3D/HumanML3D/'
@@ -886,8 +886,7 @@ class VQVAE_251(nn.Module):
                  dilation_growth_rate=3,
                  activation='relu',
                  norm=None,
-                 mask_token=False,
-                 mask_input=False):
+                 mask_token=False):
 
         super().__init__()
         self.code_dim = code_dim
@@ -899,7 +898,6 @@ class VQVAE_251(nn.Module):
                                dilation_growth_rate, activation=activation, norm=norm)
         self.quantizer = QuantizeEMAReset(nb_code, code_dim, args)
         self.use_mask_token = mask_token
-        self.mask_input = mask_input
         if mask_token:
             self.mask_token = nn.Parameter(torch.zeros(1, 1, 263))
 
@@ -918,7 +916,7 @@ class VQVAE_251(nn.Module):
         x_in = self.preprocess(x)
 
         # mask
-        if self.mask_input:
+        if self.use_mask_token:
             mask_generator = RandomMask(T, mask_ratio=0.6)
             masks = mask_generator(x)  # first dim should be Batch. return_size:256x64
             Ntotal_masks = masks.size(1) # return_size:64
@@ -943,7 +941,7 @@ class VQVAE_251(nn.Module):
         x_in = self.preprocess(x)
 
         # mask
-        if self.mask_input:
+        if self.use_mask_token:
             mask_generator = RandomMask(T, mask_ratio=0.6)
             masks = mask_generator(x)  # first dim should be Batch. return_size:256x64
             Ntotal_masks = masks.size(1) # return_size:64
@@ -989,13 +987,12 @@ class HumanVQVAE(nn.Module):
                  dilation_growth_rate=3,
                  activation='relu',
                  norm=None,
-                 mask_token=False,
-                 mask_input=False):
+                 mask_token=False):
         super().__init__()
 
         self.nb_joints = 21 if args.dataname == 'kit' else 22
         self.vqvae = VQVAE_251(args, nb_code, code_dim, output_emb_width, down_t, stride_t, width, depth,
-                               dilation_growth_rate, activation=activation, norm=norm, mask_token=mask_token, mask_input=mask_input)
+                               dilation_growth_rate, activation=activation, norm=norm, mask_token=mask_token)
 
     def encode(self, x):
         b, t, c = x.size()

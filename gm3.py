@@ -74,8 +74,7 @@ vqvae = HumanVQVAE(args,  ## use args to define different parameters in differen
                  args.dilation_growth_rate,
                  args.vq_act,
                  args.vq_norm,
-                 mask_token=use_mask_token,
-                 mask_input=False)
+                 mask_token=use_mask_token)
 
 if args.resume_pth:
     logger.info('loading checkpoint from {}'.format(args.resume_pth))
@@ -88,11 +87,6 @@ vqvae.cuda()
 m3 = MMM(mask_ratio=args.mask_ratio)
 
 if args.with_mask_token_eval:
-    ckpt_gm3 = torch.load(os.path.join('output', args.exp_name, 'net_last.pth'), map_location='cpu')
-    m3.load_state_dict(ckpt_gm3['net'], strict=True)
-    m3.eval()
-    m3.cuda()
-
     mask_token = vqvae.vqvae.mask_token
     args.nb_joints = 22
 
@@ -121,21 +115,18 @@ if args.with_mask_token_eval:
         masks = masks.view(-1)
         mask_tokens[~masks] = x_in.view(N * T, h)[~masks]
         x_in = mask_tokens.view(N, -1, h)
-        #x_in = vqvae.vqvae.preprocess(x_in) #x_in.permute(0, 2, 1)
+        x_in = vqvae.vqvae.preprocess(x_in) #x_in.permute(0, 2, 1)
 
         # vqvae encoder
         code_idx = vqvae.encode(x_in)
         quants = vqvae.vqvae.quantizer.dequantize(code_idx)
 
         # masked encoder decoder
-        # TODO: add conditions to use only vqvae or both vqvae and gm3
-        # if not vqvae_only:
-        logits, mask, target = m3(quants)
-        x_d = logits.view(1, -1, vqvae.vqvae.code_dim).permute(0, 2, 1).contiguous()
-        #else:
+        #logits, mask, target = m3(quants)
         # vqvae decoder
-        #x_d = quants.view(1, -1, vqvae.vqvae.code_dim).permute(0, 2, 1).contiguous()
+        #x_d = logits.view(1, -1, vqvae.vqvae.code_dim).permute(0, 2, 1).contiguous()
 
+        x_d = quants.view(1, -1, vqvae.vqvae.code_dim).permute(0, 2, 1).contiguous()
         x_decoder = vqvae.vqvae.decoder(x_d)
         motion_pred = vqvae.vqvae.postprocess(x_decoder)
         print(f"Seq {i}")
@@ -147,8 +138,8 @@ if args.with_mask_token_eval:
         #print(mask)
         #print()
         # vis
-        vis_motion(x_in, val_loader, args, title="GT Seq", filename=f'keyframe_gt{i}')
-        vis_motion(motion_pred, val_loader, args, title="Pred Seq", filename=f'keyframe_pred{i}')
+        vis_motion(x_in, val_loader, args, title="GT Seq", filename=f'vqvae_keyframe_gt{i}')
+        vis_motion(motion_pred, val_loader, args, title="Pred Seq", filename=f'vqvae_keyframe_pred{i}')
     exit()
 
 
@@ -189,7 +180,7 @@ if args.eval:
         print(mask)
         print()
         # vis
-        vis_motion(motion, val_loader, args, title="GT Seq", filename=f'99gm3_gt{i}')
+        #vis_motion(motion, val_loader, args, title="GT Seq", filename=f'99gm3_gt{i}')
         vis_motion(motion_pred, val_loader, args, title="Pred Seq", filename=f'99gm3_pred{i}')
 
 
